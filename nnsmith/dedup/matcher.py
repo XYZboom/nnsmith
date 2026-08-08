@@ -119,7 +119,7 @@ class PatternMatcher:
                     break
                 actual = all_nodes[i]
                 pnode = pattern.nodes[ni]
-                if actual['op'] == pnode.op and self._check_attrs(actual, pnode):
+                if self._op_matches(actual['op'], pnode.op) and self._check_attrs(actual, pnode):
                     window.append(actual)
                     ni += 1
             if ni < n:
@@ -197,6 +197,15 @@ class PatternMatcher:
             if not matcher.matches(actual):
                 return False
         return True
+
+    def _op_matches(self, actual_op: str, pattern_op: Any) -> bool:
+        """Check if an actual op name matches a pattern op (string or $in list)."""
+        if isinstance(pattern_op, str):
+            return actual_op == pattern_op
+        if isinstance(pattern_op, dict):
+            if '$in' in pattern_op:
+                return actual_op in pattern_op['$in']
+        return actual_op == pattern_op
 
     def _find_actual_ref(self, vid: str, pattern: PatternDef,
                          nodes_window: List[dict],
