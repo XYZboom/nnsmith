@@ -46,7 +46,7 @@
       "description": "wrong-code: ArgMin/ArgMax after bicubic resize produces wrong values (bug_023/026)",
       "severity": "wrong-code",
       "nodes": [
-        { "match": "node", "id": "n0", "op": "BICUBIC_INTERP", "inputs": ["v_in"], "outputs": ["v_res"], "attrs": {} },
+        { "match": "node", "id": "n0", "op": {"$in": ["BICUBIC_INTERP", "BILINEAR_INTERP"]}, "inputs": ["v_in"], "outputs": ["v_res"], "attrs": {} },
         { "match": "node", "id": "n1", "op": {"$in": ["ARGMIN", "ARGMAX"]}, "inputs": ["v_res"], "outputs": ["v_out"], "attrs": {} }
       ]
     }
