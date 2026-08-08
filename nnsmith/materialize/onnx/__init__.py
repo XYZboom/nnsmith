@@ -25,6 +25,17 @@ from nnsmith.materialize.torch import (
 )
 
 
+def _pytorch_ge_212() -> bool:
+    """PyTorch >= 2.12 defaults torch.onnx.export to dynamo=True, which uses
+    torch.export.export() and trips GuardOnDataDependentSymNode in debug_numeric.
+    Only pass dynamo=False on those versions."""
+    try:
+        from packaging import version as _pkgver
+        return _pkgver.parse(torch.__version__) >= _pkgver.parse("2.12")
+    except Exception:
+        return False
+
+
 def create_deadcode_onnx(onnx_model: onnx.ModelProto, name_mask) -> onnx.ModelProto:
     graph_def = onnx.helper.make_graph(
         nodes=onnx_model.graph.node,  # nodes
@@ -85,6 +96,7 @@ def torch2onnx(
                 verbose=verbose,
                 do_constant_folding=do_constant_folding,
                 opset_version=14,
+                **({"dynamo": False} if _pytorch_ge_212() else {}),
             )
 
     if proxy_enabled:  # Re-enable proxy grad

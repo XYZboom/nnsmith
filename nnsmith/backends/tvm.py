@@ -3,10 +3,54 @@ from typing import List
 
 import tvm
 from multipledispatch import dispatch
-from tvm import relay
 
 from nnsmith.backends import BackendFactory
 from nnsmith.materialize.onnx import ONNXModel
+
+# ── TVM 0.25 compat: tvm.relay removed, use relax instead ──
+from tvm import relax as _relax
+
+class _RelayCompat:
+    class frontend:
+        @staticmethod
+        def from_onnx(model, shape_dict, freeze_params=True, **kwargs):
+            from tvm.relax.frontend import onnx as _onnx_frontend
+            mod = _onnx_frontend.from_onnx(
+                model, shape_dict=shape_dict,
+                keep_params_in_input=not freeze_params,
+            )
+            return mod, {}
+
+    class transform:
+        @staticmethod
+        def InferType():
+            return tvm.transform.Sequential([
+                _relax.transform.CanonicalizeBindings(),
+            ])
+
+    class build_module:
+        @staticmethod
+        def create_executor(executor_mode, mod, device, target, params, **kwargs):
+            exe = _relax.build(mod, target=target, params=params)
+            vm = _relax.VirtualMachine(exe, device)
+            class _Executor:
+                def evaluate(self):
+                    def executor(**inputs):
+                        import numpy as np
+                        cuda_inputs = []
+                        for name, val in inputs.items():
+                            if isinstance(val, np.ndarray):
+                                tvm_tensor = tvm.runtime.empty(
+                                    val.shape, val.dtype, device=device
+                                )
+                                tvm_tensor.copyfrom(val)
+                                val = tvm_tensor
+                            cuda_inputs.append(val)
+                        return vm['main'](*cuda_inputs)
+                    return executor
+            return _Executor()
+
+relay = _RelayCompat()
 
 logging.getLogger("te_compiler").disabled = True
 logging.getLogger("autotvm").disabled = True
@@ -63,11 +107,18 @@ class TVM(BackendFactory):
     @staticmethod
     def cvt_result(output):
         """Pack output tensor(s) into a list"""
-        # TODO(jinkun): may not work for nested list / dynamic shape
-        assert output is not None, "Output should not be None"
-        if isinstance(output, (tvm.runtime.container.ADT, list)):
-            output = [r.numpy() for r in output]
-        elif output is not None:
+        # TVM 0.25: multi-output Relax VM returns tvm_ffi.container.Array
+        # (iterable, NOT list/tuple, no .numpy()). Handle like list.
+        if output is None:
+            return []
+        if isinstance(output, (list, tuple)):
+            output = [r.numpy() if hasattr(r, 'numpy') else r for r in output]
+        elif hasattr(output, 'numpy'):
+            output = [output.numpy()]
+        elif hasattr(output, '__iter__') and not isinstance(output, (str, bytes)):
+            # e.g. tvm_ffi.container.Array
+            output = [r.numpy() if hasattr(r, 'numpy') else r for r in output]
+        elif hasattr(output, 'shape'):
             output = [output.numpy()]
         return output
 

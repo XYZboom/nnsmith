@@ -162,3 +162,4 @@ cython_debug/
 # Exclude
 !requirements/**/*.txt
 .DS_Store
+.idea/
