@@ -1,0 +1,30 @@
+{
+  "format_version": "1.0",
+  "patterns": [
+    {
+      "id": "nnsmith-onnx-tvm-where-cond-type",
+      "compiler": "tvm",
+      "target": "cpu",
+      "description": "ONNX frontend Where condition dtype propagation bug (bug_017 int32 / bug_020 float32)",
+      "severity": "crash",
+      "nodes": [
+        { "match": "node", "id": "n0", "op": "WHERE", "inputs": ["v_cond", "v_x", "v_y"], "outputs": ["v_out"], "attrs": {} }
+      ],
+      "values": [
+        { "match": "value", "id": "v_cond", "dtype": {"$in": ["float32", "int32"]} }
+      ]
+    },
+    {
+      "id": "nnsmith-onnx-tvm-ceil-shared-wrong-code",
+      "compiler": "tvm",
+      "target": "cpu",
+      "description": "wrong-code: Ceil output shared by Atan + Softmax->BicubicInterp (bug_021)",
+      "severity": "wrong-code",
+      "nodes": [
+        { "match": "node", "id": "n0", "op": "CEIL", "inputs": ["v_in"], "outputs": ["v_ceil"], "attrs": {} },
+        { "match": "node", "id": "n1", "op": "SOFTMAX", "inputs": ["v_ceil"], "outputs": ["v_sm"], "attrs": {} },
+        { "match": "node", "id": "n2", "op": "BICUBIC_INTERP", "inputs": ["v_sm"], "outputs": ["v_out"], "attrs": {} }
+      ]
+    }
+  ]
+}
