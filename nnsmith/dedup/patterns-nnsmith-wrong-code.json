@@ -1,0 +1,20 @@
+{
+  "format_version": "1.0",
+  "patterns": [
+    {
+      "id": "nnsmith-onnx-tvm-linearl-ceil-sin",
+      "compiler": "tvm",
+      "target": "cpu",
+      "description": "wrong-code: Linear→Ceil→Sin optimizer fusion bug (bug_018)",
+      "severity": "wrong-code",
+      "nodes": [
+        { "match": "node", "id": "n0", "op": "LINEAR", "inputs": ["v_in"], "outputs": ["v_mid"], "attrs": {} },
+        { "match": "node", "id": "n1", "op": "CEIL", "inputs": ["v_mid"], "outputs": ["v_ceil"], "attrs": {} },
+        { "match": "node", "id": "n2", "op": "SIN", "inputs": ["v_ceil"], "outputs": ["v_out"], "attrs": {} }
+      ],
+      "values": [
+        { "match": "value", "id": "v_in", "dtype": "float32" }
+      ]
+    }
+  ]
+}

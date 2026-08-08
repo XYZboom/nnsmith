@@ -45,6 +45,12 @@ filter:
   type: []
   patch: []
 
+dedup:
+  enabled: false
+  pattern_dir: null
+  compiler: null
+  target: null
+
 cmp:
   equal_nan: true # skip regarding it as a bug if with fp exception values.
 

@@ -1,0 +1,31 @@
+{
+  "format_version": "1.0",
+  "patterns": [
+    {
+      "id": "tvm-frontend-max-min-axis",
+      "compiler": "tvm",
+      "target": "cpu",
+      "description": "TVM ONNX frontend Max/Min crash: numpy.max axis not scalar for multi-dim tensors",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MAXIMUM",
+          "inputs": ["v_in", "v_in2"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "ndim": {"$gte": 2},
+          "shape": [],
+          "dtype": {"$in": ["float32", "int32"]}
+        }
+      ]
+    }
+  ]
+}

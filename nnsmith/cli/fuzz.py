@@ -124,6 +124,26 @@ class FuzzingLoop:
                     )
                 FUZZ_LOG.info(f"Filter enabled: {filter}")
 
+        # Pattern dedup matcher.
+        self.dedup_matcher = None
+        self.n_dedup_skip = 0
+        dedup_cfg = cfg.get("dedup")
+        if dedup_cfg is not None and dedup_cfg.get("enabled", False):
+            pattern_dir = dedup_cfg.get("pattern_dir")
+            if pattern_dir:
+                from nnsmith.dedup import DedupMatcher
+
+                self.dedup_matcher = DedupMatcher(
+                    pattern_dir=pattern_dir,
+                    compiler=dedup_cfg.get("compiler"),
+                    target=dedup_cfg.get("target"),
+                    backend=cfg["model"]["type"],
+                )
+                FUZZ_LOG.info(
+                    f"Pattern dedup enabled: {len(self.dedup_matcher.patterns)} patterns "
+                    f"from {pattern_dir}"
+                )
+
         self.status = StatusCollect(cfg["fuzz"]["root"])
 
         self.factory = BackendFactory.init(
@@ -195,7 +215,9 @@ class FuzzingLoop:
         model.refine_weights()  # either random generated or gradient-based.
         model.set_grad_check(self.cfg["mgen"]["grad_check"])
         oracle = model.make_oracle()
-        return TestCase(model, oracle)
+        testcase = TestCase(model, oracle)
+        testcase.ir = ir  # store GIR for dedup matching
+        return testcase
 
     def validate_and_report(self, testcase: TestCase) -> bool:
         if not verify_testcase(
@@ -233,6 +255,20 @@ class FuzzingLoop:
                 continue
             time_stat["gen"] = time.time() - gen_start
 
+            # Pattern dedup: check if this program matches a known bug pattern
+            if self.dedup_matcher is not None:
+                try:
+                    matched = self.dedup_matcher.matches(testcase.ir)
+                    if matched:
+                        pids = ", ".join(p.id for p in matched)
+                        FUZZ_LOG.info(
+                            f"Dedup skipped seed {seed}: matched {pids}"
+                        )
+                        self.n_dedup_skip += 1
+                        continue
+                except Exception as e:
+                    FUZZ_LOG.debug(f"Dedup check failed for seed {seed}: {e}")
+
             eval_start = time.time()
             if not self.validate_and_report(testcase):
                 FUZZ_LOG.warning(f"Failed model seed: {seed}")
@@ -256,6 +292,8 @@ class FuzzingLoop:
         FUZZ_LOG.info(f"Total {self.status.n_testcases} testcases generated.")
         FUZZ_LOG.info(f"Total {self.status.n_bugs} bugs found.")
         FUZZ_LOG.info(f"Total {self.status.n_fail_make_test} failed to make testcases.")
+        if self.n_dedup_skip > 0:
+            FUZZ_LOG.info(f"Total {self.n_dedup_skip} testcases skipped by pattern dedup.")
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="main")
