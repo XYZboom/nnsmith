@@ -1,11 +1,13 @@
 import logging
 from typing import List
 
+import numpy as np
 import tvm
 from multipledispatch import dispatch
 
 from nnsmith.backends import BackendFactory
 from nnsmith.materialize.onnx import ONNXModel
+from nnsmith.materialize.tvm import TVMModel
 
 # ── TVM 0.25 compat: tvm.relay removed, use relax instead ──
 from tvm import relax as _relax
@@ -140,6 +142,35 @@ class TVM(BackendFactory):
             output = executor(**inputs)
             output = self.cvt_result(output)
             return dict(zip(model.output_like.keys(), output))
+
+        return closure
+
+    @dispatch(TVMModel)
+    def make_backend(self, model: TVMModel):
+        """Execute a TVM Relax IRModule directly (TVM frontend + TVM backend)."""
+        mod = model.native_model
+        if mod is None:
+            err = getattr(model, '_build_error', 'Unknown build error')
+            raise RuntimeError(f"TVM model build failed: {err}")
+        with tvm.transform.PassContext(opt_level=self.opt_level):
+            exe = _relax.build(mod, target=self.tvm_target)
+            vm = _relax.VirtualMachine(exe, self.get_device())
+
+        def closure(inputs):
+            # inputs: Dict[str, np.ndarray] ordered by input_map keys
+            args = []
+            for name in model.input_map.keys():
+                val = inputs[name]
+                if isinstance(val, np.ndarray):
+                    tvm_tensor = tvm.runtime.empty(
+                        val.shape, val.dtype, device=self.get_device()
+                    )
+                    tvm_tensor.copyfrom(val)
+                    val = tvm_tensor
+                args.append(val)
+            output = vm["main"](*args)
+            output = self.cvt_result(output)
+            return dict(zip(model.output_map.keys(), output))
 
         return closure
 

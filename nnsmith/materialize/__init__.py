@@ -237,6 +237,10 @@ class Model(ABC):
                 # XLA must align device location of eager mode execution.
                 return TFModelCUDA
             return TFModelCPU
+        elif name == "tvm":
+            from nnsmith.materialize.tvm import TVMModel
+
+            return TVMModel
 
         raise ValueError(
             f"Unsupported: ModelType={name} for BackendTarget={backend_target}"
@@ -320,7 +324,7 @@ class BugReport(ABC):
     def __repr__(self) -> str:
         return f"{self.system} {self.symptom.value} in {self.stage.value}\n{self.log}"
 
-    def dump(self, root_folder: PathLike):
+    def dump(self, root_folder: PathLike, gir: Optional["GraphIR"] = None):
         # create folder if not exists
         if not os.path.exists(root_folder):
             os.makedirs(root_folder)
@@ -343,6 +347,14 @@ class BugReport(ABC):
                 },
                 f,
             )
+        # ir.jsonl — GIR 序列化（参考 aifuzzer 的 BugCollector 保存 ir.jsonl）
+        if gir is not None:
+            try:
+                from nnsmith.gir_serializer import GirSerializer
+                with open(os.path.join(root_folder, "ir.jsonl"), "w") as f:
+                    f.write(GirSerializer.to_jsonl(gir))
+            except Exception as e:
+                pass  # 序列化失败不应阻止 bug 报告保存
 
     @staticmethod
     def load(model_type, root_folder: str, allow_partial=False) -> "BugReport":
