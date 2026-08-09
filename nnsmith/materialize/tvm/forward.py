@@ -486,33 +486,49 @@ def _triu(op, inputs, bb, pm):
     diag = int(op.diagonal)
     return rop.triu(inputs[0], k=diag)
 
-# ── Interpolation (not directly available in relax; use reshape + broadcast) ──
+# ── Interpolation ──
+
+def _interp_impl(op, inputs, bb, pm, method):
+    """Implement interpolation via TVM resize2d/resize3d using the GIR output shape."""
+    out_shape = [int(s) if not hasattr(s, 'as_long') else s.as_long() for s in op.output_like[0].shape]
+    in_rank = op.input_like[0].ndims
+    n_spatial = len(op.size)  # 1, 2, or 3 spatial dims
+    target_size = tuple(int(s) if not hasattr(s, 'as_long') else s.as_long() for s in op.size)
+
+    if n_spatial == 1:
+        # 1D interp: input rank 3 (N, C, L) -> add dummy H dim, resize2d, squeeze
+        x = rop.expand_dims(inputs[0], axis=2)  # [N, C, 1, L]
+        x = rop.image.resize2d(x, size=(1, target_size[0]), layout='NCHW', method=method)
+        x = rop.squeeze(x, axis=2)  # [N, C, L']
+        return x
+    elif n_spatial == 2:
+        # 2D interp: input rank 4 (N, C, H, W)
+        return rop.image.resize2d(inputs[0], size=target_size, layout='NCHW', method=method)
+    elif n_spatial == 3:
+        # 3D interp: input rank 5 (N, C, D, H, W)
+        return rop.image.resize3d(inputs[0], size=target_size, layout='NCDHW', method=method)
+    else:
+        raise NotImplementedError(f"Interp with {n_spatial} spatial dims not supported")
 
 @register(NearestInterp)
 def _nearest_interp(op, inputs, bb, pm):
-    # Use repeat-based nearest upsampling
-    # For simplicity, we use reshape + broadcast_to
-    # Actually TVM relax does not have native interpolate.
-    # We'll implement via slicing/broadcast for now.
-    # For simplicity, skip interpolation ops - they are rare in fuzzing.
-    # Just return the input unchanged (known limitation)
-    return inputs[0]
+    return _interp_impl(op, inputs, bb, pm, 'nearest_neighbor')
 
 @register(LinearInterp)
 def _linear_interp(op, inputs, bb, pm):
-    return inputs[0]
+    return _interp_impl(op, inputs, bb, pm, 'linear')
 
 @register(BilinearInterp)
 def _bilinear_interp(op, inputs, bb, pm):
-    return inputs[0]
+    return _interp_impl(op, inputs, bb, pm, 'linear')
 
 @register(BicubicInterp)
 def _bicubic_interp(op, inputs, bb, pm):
-    return inputs[0]
+    return _interp_impl(op, inputs, bb, pm, 'cubic')
 
 @register(TrilinearInterp)
 def _trilinear_interp(op, inputs, bb, pm):
-    return inputs[0]
+    return _interp_impl(op, inputs, bb, pm, 'linear')
 
 # ── Slice ──
 
