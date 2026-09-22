@@ -64,7 +64,9 @@ def verify_testcase(
                     f"{bug_report.symptom}-{bug_report.stage}",
                 )
                 EXEC_LOG.warning("Saving bug report to {}".format(odir))
-                bug_report.dump(odir)
+                # 传入 GIR 以便序列化 ir.jsonl（参考 aifuzzer BugCollector 行为）
+                bug_report_gir = getattr(testcase, 'ir', None)
+                bug_report.dump(odir, gir=bug_report_gir)
             return False
 
     bug_or_res = factory.checked_compile_and_exec(

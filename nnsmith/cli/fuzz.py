@@ -126,7 +126,8 @@ class FuzzingLoop:
 
         # Pattern dedup matcher.
         self.dedup_matcher = None
-        self.n_dedup_skip = 0
+        self.n_dedup_rewrite = 0
+        self.n_dedup_rewrite_fail = 0
         dedup_cfg = cfg.get("dedup")
         if dedup_cfg is not None and dedup_cfg.get("enabled", False):
             pattern_dir = dedup_cfg.get("pattern_dir")
@@ -255,19 +256,29 @@ class FuzzingLoop:
                 continue
             time_stat["gen"] = time.time() - gen_start
 
-            # Pattern dedup: check if this program matches a known bug pattern
+            # Pre-dedup: rewrite trigger nodes to avoid known bug patterns.
+            # Mirrors AIFuzzer rollback-rewrite: on pattern hit, rewrite this
+            # op instead of skipping the program; keep as-is if rewrite fails.
             if self.dedup_matcher is not None:
                 try:
                     matched = self.dedup_matcher.matches(testcase.ir)
                     if matched:
                         pids = ", ".join(p.id for p in matched)
-                        FUZZ_LOG.info(
-                            f"Dedup skipped seed {seed}: matched {pids}"
-                        )
-                        self.n_dedup_skip += 1
-                        continue
+                        from nnsmith.dedup.rewrite import rewrite_gir
+                        new_gir = rewrite_gir(testcase.ir, self.dedup_matcher)
+                        if new_gir is not None:
+                            testcase.ir = new_gir
+                            self.n_dedup_rewrite += 1
+                            FUZZ_LOG.info(
+                                f"Pre-dedup rewrote seed {seed} to avoid {pids}"
+                            )
+                        else:
+                            self.n_dedup_rewrite_fail += 1
+                            FUZZ_LOG.info(
+                                f"Pre-dedup rewrite failed for seed {seed} ({pids}), keep as-is"
+                            )
                 except Exception as e:
-                    FUZZ_LOG.debug(f"Dedup check failed for seed {seed}: {e}")
+                    FUZZ_LOG.debug(f"Pre-dedup check failed for seed {seed}: {e}")
 
             eval_start = time.time()
             if not self.validate_and_report(testcase):
@@ -283,6 +294,14 @@ class FuzzingLoop:
                 tmp, testcase.model.dotstring = testcase.model.dotstring, None
                 testcase.dump(testcase_dir)
                 testcase.model.dotstring = tmp
+                # 保存 GIR 序列化（参考 aifuzzer BugCollector 保存 ir.jsonl）
+                if hasattr(testcase, 'ir') and testcase.ir is not None:
+                    try:
+                        from nnsmith.gir_serializer import GirSerializer
+                        with open(os.path.join(testcase_dir, "ir.jsonl"), "w") as f:
+                            f.write(GirSerializer.to_jsonl(testcase.ir))
+                    except Exception:
+                        pass
                 time_stat["save"] = time.time() - save_start
 
             FUZZ_LOG.info(
@@ -292,8 +311,11 @@ class FuzzingLoop:
         FUZZ_LOG.info(f"Total {self.status.n_testcases} testcases generated.")
         FUZZ_LOG.info(f"Total {self.status.n_bugs} bugs found.")
         FUZZ_LOG.info(f"Total {self.status.n_fail_make_test} failed to make testcases.")
-        if self.n_dedup_skip > 0:
-            FUZZ_LOG.info(f"Total {self.n_dedup_skip} testcases skipped by pattern dedup.")
+        if self.n_dedup_rewrite > 0 or self.n_dedup_rewrite_fail > 0:
+            FUZZ_LOG.info(
+                f"Total {self.n_dedup_rewrite} testcases rewritten by pre-dedup; "
+                f"{self.n_dedup_rewrite_fail} rewrite failed (kept as-is)."
+            )
 
 
 @hydra.main(version_base=None, config_path="../config", config_name="main")

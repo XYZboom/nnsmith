@@ -175,7 +175,7 @@ class TVMModel(Model):
                 inputs[name] = np.random.randint(0, 5, size=shape).astype(dt)
 
         try:
-            ex = relax.build(self.mod, target="llvm")
+            ex = relax.build(self.mod, target="cuda")
             vm = relax.VirtualMachine(ex, tvm.cpu())
             args = [inputs[name] for name in self.input_map.keys()]
             out = vm["main"](*args)

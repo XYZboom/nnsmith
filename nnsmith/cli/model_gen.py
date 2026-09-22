@@ -94,6 +94,13 @@ def main(cfg: DictConfig):
     tsave_begin = time.time()
     testcase = TestCase(model, oracle)
     testcase.dump(root_folder=mgen_cfg["save"])
+    # 保存 GIR 序列化
+    try:
+        from nnsmith.gir_serializer import GirSerializer
+        with open(os.path.join(mgen_cfg["save"], "ir.jsonl"), "w") as f:
+            f.write(GirSerializer.to_jsonl(ir))
+    except Exception:
+        pass
     tsave = time.time() - tsave_begin
 
     MGEN_LOG.info(
