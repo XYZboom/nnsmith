@@ -1,0 +1,79 @@
+{
+  "format_version": "1.0",
+  "campaign": {
+    "backend": "pt2",
+    "target": "cpu",
+    "model": "torch",
+    "max_nodes": 10,
+    "base_seed": 20260925,
+    "source_log": "Antigravity task-692.log",
+    "note": "Each seed below both produced a bug report in the no-dedup program group and matched the listed pattern in the dedup program group."
+  },
+  "patterns": [
+    {
+      "pattern_id": "pt-inductor-fp16-interp",
+      "seeds": [20260944, 20261376, 20261465, 20261531, 20261587, 20261711, 20262481],
+      "bug_reports": [
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-0",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-19",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-24",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-27",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-32",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-36",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-63"
+      ]
+    },
+    {
+      "pattern_id": "pt-inductor-fp16-softmax-floor",
+      "seeds": [20260951, 20262254],
+      "bug_reports": [
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-1",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-54"
+      ]
+    },
+    {
+      "pattern_id": "pt-inductor-reducemin-concat-int",
+      "seeds": [20260954],
+      "bug_reports": [
+        "bug-Symptom.EXCEPTION-Stage.EXECUTION-2"
+      ]
+    },
+    {
+      "pattern_id": "pt-inductor-fp16-reducesum-floor",
+      "seeds": [20260963, 20261201, 20262138],
+      "bug_reports": [
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-3",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-13",
+        "bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-49"
+      ]
+    }
+  ],
+  "validation": {
+    "date": "2026-10-09",
+    "configuration": "pt2/cpu, torch model, max_nodes=10, each targeted seed resets all RNG state",
+    "no_dedup_programs": {
+      "description": "Programs executed without pattern matching or rewriting.",
+      "testcases": 13,
+      "bug_reports": 13
+    },
+    "dedup_programs": {
+      "description": "Programs matched against patterns-pytorch.json and locally rewritten when possible.",
+      "testcases": 13,
+      "bug_reports": 11,
+      "rewritten": 8,
+      "rewrite_failed_and_kept_original": 5
+    },
+    "bugs_prevented_for_seeds": [20261465, 20260954],
+    "bugs_remaining_for_seeds": [
+      20260944, 20261376, 20261531, 20261587, 20261711, 20262481,
+      20260951, 20262254, 20260963, 20261201, 20262138
+    ],
+    "result": "Pattern disappearance alone is insufficient: 6 of 7 rewritten interpolation programs still reported inconsistencies. Runtime validation is required before accepting a rewrite."
+  },
+  "usage": {
+    "seed_file_override": "fuzz.seed_file=nnsmith/dedup/known_bug_seeds.json",
+    "single_seed_override": "fuzz.seeds=[20260944]",
+    "multiple_seed_override": "fuzz.seeds=[20260944,20260951,20260954]",
+    "pattern_file_override": "dedup.enabled=true dedup.pattern_dir=nnsmith/dedup/patterns-pytorch.json"
+  }
+}

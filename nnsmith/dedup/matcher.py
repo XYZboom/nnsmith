@@ -39,9 +39,17 @@ class PatternMatcher:
         for p in self.patterns:
             if len(p.nodes) == 1:
                 op = p.nodes[0].op
-                if op not in self.single_op_patterns:
-                    self.single_op_patterns[op] = []
-                self.single_op_patterns[op].append(p)
+                if isinstance(op, str):
+                    if op not in self.single_op_patterns:
+                        self.single_op_patterns[op] = []
+                    self.single_op_patterns[op].append(p)
+                elif isinstance(op, dict) and "$in" in op:
+                    for o in op["$in"]:
+                        if o not in self.single_op_patterns:
+                            self.single_op_patterns[o] = []
+                        self.single_op_patterns[o].append(p)
+                else:
+                    self.multi_op_patterns.append(p)
             else:
                 self.multi_op_patterns.append(p)
 
@@ -292,15 +300,20 @@ class DedupMatcher:
             import os
             if os.path.isdir(pattern_dir):
                 all_patterns = load_patterns(pattern_dir)
-                # Filter
-                for p in all_patterns:
-                    if compiler is not None and p.compiler != compiler:
-                        continue
-                    if target is not None and p.target is not None and p.target != target:
-                        continue
-                    self.patterns.append(p)
-                self.matcher = PatternMatcher(self.patterns,
-                                              compiler=compiler, target=target)
+            elif os.path.isfile(pattern_dir):
+                from nnsmith.dedup.parser import parse_pattern_file
+                all_patterns = parse_pattern_file(pattern_dir)
+            else:
+                all_patterns = []
+            # Filter
+            for p in all_patterns:
+                if compiler is not None and p.compiler != compiler:
+                    continue
+                if target is not None and p.target is not None and p.target != target:
+                    continue
+                self.patterns.append(p)
+            self.matcher = PatternMatcher(self.patterns,
+                                          compiler=compiler, target=target)
 
     def matches(self, ir) -> List[PatternDef]:
         """Check if a GraphIR program matches any pattern. Returns matched patterns."""

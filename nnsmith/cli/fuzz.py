@@ -1,3 +1,4 @@
+import json
 import os
 import random
 import time
@@ -27,6 +28,61 @@ from nnsmith.util import (
     parse_timestr,
     set_seed,
 )
+
+
+def normalize_fuzz_seeds(seeds):
+    """Normalize an optional explicit seed list from Hydra config."""
+    if seeds is None:
+        return None
+    if isinstance(seeds, (int, str)):
+        seeds = [seeds]
+    normalized = [int(seed) for seed in seeds]
+    if not normalized:
+        raise ValueError("`fuzz.seeds` must contain at least one seed.")
+    for seed in normalized:
+        if not 0 <= seed < 2**32:
+            raise ValueError(f"Invalid fuzz seed {seed}: expected 0 <= seed < 2**32.")
+    return normalized
+
+
+def load_fuzz_seeds(seed_file):
+    """Load an ordered seed sequence from a JSON file."""
+    path = Path(str(seed_file)).expanduser()
+    if not path.is_file():
+        raise ValueError(f"Fuzz seed file does not exist: {path}")
+
+    with path.open() as f:
+        data = json.load(f)
+
+    if isinstance(data, list):
+        seeds = data
+    elif isinstance(data, dict) and isinstance(data.get("seeds"), list):
+        seeds = data["seeds"]
+    elif isinstance(data, dict) and isinstance(data.get("patterns"), list):
+        seeds = []
+        for pattern in data["patterns"]:
+            pattern_seeds = pattern.get("seeds") if isinstance(pattern, dict) else None
+            if not isinstance(pattern_seeds, list):
+                raise ValueError(
+                    f"Invalid pattern seed entry in {path}: expected a `seeds` list."
+                )
+            seeds.extend(pattern_seeds)
+    else:
+        raise ValueError(
+            f"Unsupported fuzz seed file format in {path}: expected a JSON list, "
+            "an object with `seeds`, or an object with grouped `patterns`."
+        )
+
+    return normalize_fuzz_seeds(seeds)
+
+
+def resolve_fuzz_seeds(explicit_seeds, seed_file):
+    """Resolve exactly one optional source of targeted fuzz seeds."""
+    if explicit_seeds is not None and seed_file is not None:
+        raise ValueError("Set only one of `fuzz.seeds` and `fuzz.seed_file`.")
+    if seed_file is not None:
+        return load_fuzz_seeds(seed_file)
+    return normalize_fuzz_seeds(explicit_seeds)
 
 
 class StatusCollect:
@@ -134,14 +190,32 @@ class FuzzingLoop:
             if pattern_dir:
                 from nnsmith.dedup import DedupMatcher
 
+                # Align with aiFuzzer: infer compiler and target if not specified
+                compiler = dedup_cfg.get("compiler")
+                if compiler is None:
+                    b_type = str(cfg["backend"]["type"]).lower()
+                    if b_type in ["torch", "torchjit", "pt2"]:
+                        compiler = "pytorch"
+                    elif "tvm" in b_type:
+                        compiler = "tvm"
+                    elif "onnx" in b_type:
+                        compiler = "onnx"
+                    else:
+                        compiler = b_type
+
+                target = dedup_cfg.get("target")
+                if target is None:
+                    target = cfg["backend"]["target"]
+
                 self.dedup_matcher = DedupMatcher(
                     pattern_dir=pattern_dir,
-                    compiler=dedup_cfg.get("compiler"),
-                    target=dedup_cfg.get("target"),
+                    compiler=compiler,
+                    target=target,
                     backend=cfg["model"]["type"],
                 )
                 FUZZ_LOG.info(
                     f"Pattern dedup enabled: {len(self.dedup_matcher.patterns)} patterns "
+                    f"(compiler={compiler}, target={target}) "
                     f"from {pattern_dir}"
                 )
 
@@ -175,7 +249,19 @@ class FuzzingLoop:
         hijack_patch_requires(cfg["mgen"]["patch_requires"])
         activate_ext(opset=self.opset, factory=self.factory)
 
-        seed = cfg["fuzz"]["seed"] or random.getrandbits(32)
+        self.base_seed = cfg["fuzz"]["seed"]
+        self.specific_seeds = resolve_fuzz_seeds(
+            cfg["fuzz"].get("seeds", None),
+            cfg["fuzz"].get("seed_file", None),
+        )
+        if self.specific_seeds is not None:
+            seed = self.specific_seeds[0]
+            FUZZ_LOG.info(
+                f"Running {len(self.specific_seeds)} explicitly configured fuzz seed(s): "
+                f"{self.specific_seeds}"
+            )
+        else:
+            seed = self.base_seed if self.base_seed is not None else random.getrandbits(32)
         set_seed(seed)
 
         FUZZ_LOG.info(
@@ -190,12 +276,17 @@ class FuzzingLoop:
             self.timeout_s, int
         ), "`fuzz.time` must be an integer (with `s` (default), `m`/`min`, or `h`/`hr`)."
 
+        self.max_testcases = self.cfg["fuzz"].get("max_testcases", None)
+        if self.max_testcases is not None:
+            self.max_testcases = int(self.max_testcases)
+            FUZZ_LOG.info(f"Fuzzing will stop after {self.max_testcases} testcases.")
+
         self.save_test = cfg["fuzz"]["save_test"]
         if isinstance(self.save_test, str):  # path of root dir.
             FUZZ_LOG.info(f"Saving all intermediate testcases to {self.save_test}")
             mkdir(self.save_test)
 
-    def make_testcase(self, seed) -> TestCase:
+    def make_concrete_gir(self, seed):
         mgen_cfg = self.cfg["mgen"]
         gen = model_gen(
             opset=self.opset,
@@ -207,8 +298,37 @@ class FuzzingLoop:
             rank_choices=mgen_cfg["rank_choices"],
             dtype_choices=mgen_cfg["dtype_choices"],
         )
+        return gen.make_concrete()
 
-        ir = gen.make_concrete()
+    def make_testcase(self, seed) -> TestCase:
+        ir = self.make_concrete_gir(seed)
+
+        # Pre-dedup rewrites this exact program. It never replaces the program
+        # with another seed and never skips it.
+        if self.dedup_matcher is not None:
+            try:
+                matched = self.dedup_matcher.matches(ir)
+                if matched:
+                    pids = ", ".join(p.id for p in matched)
+                    from nnsmith.dedup.rewrite import rewrite_gir
+
+                    rewritten_ir = rewrite_gir(ir, self.dedup_matcher)
+                    if rewritten_ir is not None:
+                        ir = rewritten_ir
+                        self.n_dedup_rewrite += 1
+                        FUZZ_LOG.info(
+                            f"Pre-dedup rewrote seed {seed} to avoid [{pids}]"
+                        )
+                    else:
+                        self.n_dedup_rewrite_fail += 1
+                        FUZZ_LOG.info(
+                            f"Pre-dedup rewrite failed for seed {seed} ([{pids}]); "
+                            "keeping the original program"
+                        )
+            except Exception:
+                self.n_dedup_rewrite_fail += 1
+                FUZZ_LOG.exception(f"Pre-dedup failed for seed {seed}; keeping the original program")
+
         model = self.ModelType.from_gir(ir)
         if self.cfg["debug"]["viz"]:
             model.attach_viz(ir)
@@ -236,8 +356,20 @@ class FuzzingLoop:
 
     def run(self):
         start_time = time.time()
+        attempt_index = 0
         while time.time() - start_time < self.timeout_s:
-            seed = random.getrandbits(32)
+            if self.specific_seeds is not None and attempt_index >= len(self.specific_seeds):
+                break
+            if self.max_testcases is not None and self.status.n_testcases >= self.max_testcases:
+                break
+            if self.specific_seeds is not None:
+                seed = self.specific_seeds[attempt_index]
+                # Make each targeted seed independently reproducible, including
+                # weight/oracle generation after GraphIR construction.
+                set_seed(seed)
+            else:
+                seed = random.getrandbits(32)
+            attempt_index += 1
             FUZZ_LOG.debug(f"Making testcase with seed: {seed}")
 
             time_stat = {}
@@ -255,30 +387,6 @@ class FuzzingLoop:
                 self.status.n_fail_make_test += 1
                 continue
             time_stat["gen"] = time.time() - gen_start
-
-            # Pre-dedup: rewrite trigger nodes to avoid known bug patterns.
-            # Mirrors AIFuzzer rollback-rewrite: on pattern hit, rewrite this
-            # op instead of skipping the program; keep as-is if rewrite fails.
-            if self.dedup_matcher is not None:
-                try:
-                    matched = self.dedup_matcher.matches(testcase.ir)
-                    if matched:
-                        pids = ", ".join(p.id for p in matched)
-                        from nnsmith.dedup.rewrite import rewrite_gir
-                        new_gir = rewrite_gir(testcase.ir, self.dedup_matcher)
-                        if new_gir is not None:
-                            testcase.ir = new_gir
-                            self.n_dedup_rewrite += 1
-                            FUZZ_LOG.info(
-                                f"Pre-dedup rewrote seed {seed} to avoid {pids}"
-                            )
-                        else:
-                            self.n_dedup_rewrite_fail += 1
-                            FUZZ_LOG.info(
-                                f"Pre-dedup rewrite failed for seed {seed} ({pids}), keep as-is"
-                            )
-                except Exception as e:
-                    FUZZ_LOG.debug(f"Pre-dedup check failed for seed {seed}: {e}")
 
             eval_start = time.time()
             if not self.validate_and_report(testcase):

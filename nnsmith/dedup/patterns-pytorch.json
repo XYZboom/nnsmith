@@ -1,0 +1,141 @@
+{
+  "format_version": "1.0",
+  "patterns": [
+    {
+      "id": "pt-inductor-reducemin-concat-int",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CppCompileError: ReduceMin feeding Concat on integer tensors produces malformed C++ kernel indexing",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node", "id": "n0", "op": "REDUCE_MIN",
+          "inputs": ["v_in"],
+          "outputs": ["v_red"],
+          "attrs": {}
+        },
+        {
+          "match": "node", "id": "n1", "op": {"$in": ["CONCAT", "CONCAT1", "CONCAT2", "CONCAT3", "CONCAT4", "CONCAT5"]},
+          "inputs": ["v_red"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value", "id": "v_in",
+          "ndim": {"$gte": 2},
+          "dtype": {"$in": ["int16", "int32", "int64"]}
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-softmax-floor",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor precision inconsistency: Softmax followed by Floor truncation on float16 tensors",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node", "id": "n0", "op": "SOFTMAX",
+          "inputs": ["v_in"],
+          "outputs": ["v_sm"],
+          "attrs": {}
+        },
+        {
+          "match": "node", "id": "n1", "op": "FLOOR",
+          "inputs": ["v_sm"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value", "id": "v_in",
+          "ndim": {"$gte": 2},
+          "dtype": "float16"
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-reducesum-floor",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor precision inconsistency: ReduceSum followed by Floor truncation on float16 tensors",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node", "id": "n0", "op": "REDUCE_SUM",
+          "inputs": ["v_in"],
+          "outputs": ["v_sum"],
+          "attrs": {}
+        },
+        {
+          "match": "node", "id": "n1", "op": "FLOOR",
+          "inputs": ["v_sum"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value", "id": "v_in",
+          "ndim": {"$gte": 2},
+          "dtype": "float16"
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-interp",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor precision inconsistency: Interpolation ops on float16 lack CPU native support",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node", "id": "n0", "op": {"$in": ["BICUBIC_INTERP", "TRILINEAR_INTERP", "BILINEAR_INTERP"]},
+          "inputs": ["v_in"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value", "id": "v_in",
+          "ndim": {"$gte": 3},
+          "dtype": "float16"
+        }
+      ]
+    },
+    {
+      "id": "pt-190421",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "inductor sum(inf, dtype=int32) OverflowError in index_propagation",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node", "id": "n0", "op": "LOG",
+          "inputs": ["v_in"],
+          "outputs": ["v_log"],
+          "attrs": {}
+        },
+        {
+          "match": "node", "id": "n1", "op": "REDUCE_SUM",
+          "inputs": ["v_log"],
+          "outputs": ["v_out"],
+          "attrs": {
+            "dtype": {"$eq": "int32"}
+          }
+        }
+      ],
+      "values": [
+        {
+          "match": "value", "id": "v_in",
+          "ndim": {"$gte": 1},
+          "dtype": "float32"
+        }
+      ]
+    }
+  ]
+}

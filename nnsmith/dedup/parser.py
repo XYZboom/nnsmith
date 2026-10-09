@@ -88,8 +88,20 @@ def parse_pattern_file(filepath: str) -> List[PatternDef]:
     """Parse a pattern JSON file. Returns list of PatternDef."""
     with open(filepath) as f:
         data = json.load(f)
+    if isinstance(data, list):
+        raw_patterns = data
+    elif isinstance(data, dict):
+        if 'patterns' in data and isinstance(data['patterns'], list):
+            raw_patterns = data['patterns']
+        elif 'id' in data and 'nodes' in data:
+            raw_patterns = [data]
+        else:
+            raw_patterns = []
+    else:
+        raw_patterns = []
+
     patterns = []
-    for p_json in data.get('patterns', []):
+    for p_json in raw_patterns:
         p = p_json
         nodes = []
         for n_json in p.get('nodes', []):
