@@ -558,6 +558,42 @@
       ]
     },
     {
+      "id": "pt-inductor-complex-where-pointwise-stride-input1-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor fallback crashes when a broadcast complex Where output feeds Add or Sub as second operand (toInput: 1)",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "WHERE",
+          "inputs": ["v_cond", "v_true", "v_false"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {"$in": ["ADD", "SUBTRACT"]},
+          "inputs": ["v_other", "v_complex"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_complex",
+          "ndim": {"$gte": 2},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 1}
+      ]
+    },
+    {
       "id": "pt-inductor-complex-where-concat-pointwise-stride-crash",
       "compiler": "pytorch",
       "target": "cpu",

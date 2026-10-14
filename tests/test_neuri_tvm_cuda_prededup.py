@@ -175,6 +175,8 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 'pt-inductor-complex-where-pointwise-stride-crash',
             'worker_1/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-93':
                 'pt-inductor-complex-where-squeeze-pointwise-stride-crash',
+            'worker_0/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-101':
+                'pt-inductor-complex-where-pointwise-stride-input1-crash',
         }
         if not all((PYTORCH_V5_DIR / rel / 'gir.pkl').exists() for rel in samples):
             self.skipTest('Archived PyTorch v5 GIR files are not available')
