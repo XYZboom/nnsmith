@@ -594,6 +594,35 @@
       ]
     },
     {
+      "id": "pt-inductor-reshape-replicate-pad-symbolic-range-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor symbolic range inference crashes when Reshape directly feeds ReplicatePad",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "RESHAPE",
+          "inputs": ["v_in"],
+          "outputs": ["v_reshape"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "REPLICATE_PAD",
+          "inputs": ["v_reshape"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
       "id": "pt-inductor-complex-where-concat-pointwise-stride-crash",
       "compiler": "pytorch",
       "target": "cpu",
