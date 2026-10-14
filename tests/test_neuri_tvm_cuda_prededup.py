@@ -28,6 +28,10 @@ PYTORCH_V5_DIR = Path(
     '/home/xyzboom/Data/maybeBug/2026-10-13/'
     'neuri_pt2_5k_targeted_paired_v5/dedup'
 )
+PYTORCH_V6_DIR = Path(
+    '/home/xyzboom/Data/maybeBug/2026-10-14/'
+    'neuri_pt2_5k_targeted_paired_v6/dedup'
+)
 
 class TestNeuriTvmCudaPrededup(unittest.TestCase):
     @classmethod
@@ -150,6 +154,33 @@ def _flow_pattern():
 
 
 class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
+    def test_v6_residual_crash_patterns_match_archived_reports(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        samples = {
+            'worker_0/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-38':
+                'pt-inductor-fp16-atan-dual-reduce-sum-duplicate-decl',
+            'worker_1/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-33':
+                'pt-inductor-cpu-int32-matmul-chain-dtype-mismatch',
+        }
+        if not all((PYTORCH_V6_DIR / rel / 'gir.pkl').exists() for rel in samples):
+            self.skipTest('Archived PyTorch v6 GIR files are not available')
+
+        for rel, expected_pattern in samples.items():
+            with (PYTORCH_V6_DIR / rel / 'gir.pkl').open('rb') as stream:
+                gir = pickle.load(stream)
+            self.assertIn(
+                expected_pattern,
+                {pattern.id for pattern in dedup.matches(gir)},
+            )
+
     def test_precise_crash_patterns_match_archived_reports(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'

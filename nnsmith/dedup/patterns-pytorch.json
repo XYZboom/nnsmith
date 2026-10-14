@@ -410,6 +410,110 @@
       ]
     },
     {
+      "id": "pt-inductor-fp16-atan-dual-reduce-sum-duplicate-decl",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU duplicate Half accumulator declaration for two reduce-sum outputs from one float16 atan tensor",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ATAN",
+          "inputs": ["v_in"],
+          "outputs": ["v_src"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "REDUCE_SUM",
+          "inputs": ["v_src"],
+          "outputs": ["v_out0"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "REDUCE_SUM",
+          "inputs": ["v_src"],
+          "outputs": ["v_out1"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_src",
+          "dtype": {"$eq": "float16"}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-cpu-int32-matmul-chain-dtype-mismatch",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU chained int32 matmul can lower one operand to int64 and fail the second matrix multiplication",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MATMUL",
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_mid"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "MATMUL",
+          "inputs": ["v_mid", "v_tail"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_lhs",
+          "ndim": {"$eq": 2},
+          "dtype": {"$eq": "int32"}
+        },
+        {
+          "match": "value",
+          "id": "v_rhs",
+          "ndim": {"$eq": 3},
+          "dtype": {"$eq": "int32"}
+        },
+        {
+          "match": "value",
+          "id": "v_mid",
+          "ndim": {"$eq": 3},
+          "dtype": {"$eq": "int32"}
+        },
+        {
+          "match": "value",
+          "id": "v_tail",
+          "ndim": {"$eq": 2},
+          "dtype": {"$eq": "int32"}
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "ndim": {"$eq": 3},
+          "dtype": {"$eq": "int32"}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
       "id": "pt-inductor-complex-mul-cast-softmax-ge-crash",
       "compiler": "pytorch",
       "target": "cpu",
