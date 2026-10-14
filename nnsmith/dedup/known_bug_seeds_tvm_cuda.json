@@ -1,0 +1,367 @@
+{
+  "format_version": "1.0",
+  "campaign": {
+    "backend": "tvm",
+    "target": "cuda",
+    "model": "torch",
+    "source_data": "/home/xyzboom/Data/maybeBug/2026-09-24/neuri_tvm_cuda_10k",
+    "pattern_source": "/home/xyzboom/Data/remote-2026-10-01/patterns-neu-compile/neu-compile.json",
+    "note": "Validated against 127 archived TVM CUDA bug reports with GIR available."
+  },
+  "patterns": [
+    {
+      "pattern_id": "neu-bind-26",
+      "seeds": [
+        100,
+        293,
+        631,
+        2475,
+        3061,
+        6212,
+        6312
+      ],
+      "bug_reports": [
+        "bug-seed-100-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2475-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-293-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3061-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6212-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-631-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6312-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-bind-36",
+      "seeds": [
+        18,
+        100,
+        146,
+        275,
+        293,
+        394,
+        410,
+        411,
+        465,
+        631,
+        645,
+        748,
+        962,
+        1165,
+        1328,
+        1549,
+        1575,
+        1772,
+        1857,
+        1879,
+        1997,
+        2114,
+        2186,
+        2393,
+        2475,
+        2718,
+        2729,
+        2888,
+        2935,
+        2952,
+        3061,
+        3067,
+        3114,
+        3171,
+        3193,
+        3322,
+        3465,
+        3492,
+        3548,
+        3581,
+        3615,
+        3729,
+        3760,
+        3762,
+        3871,
+        4012,
+        4075,
+        4222,
+        4243,
+        4360,
+        4429,
+        5042,
+        5296,
+        5516,
+        5585,
+        5632,
+        5673,
+        5842,
+        6099,
+        6212,
+        6312,
+        6380,
+        6386,
+        6567,
+        6770,
+        6803,
+        6811,
+        6936,
+        7083,
+        7087,
+        7094,
+        7275,
+        7424,
+        7544,
+        7707,
+        7843,
+        7932,
+        8095,
+        8122,
+        8137,
+        8209,
+        8319,
+        8335,
+        8363,
+        8619,
+        8628,
+        8925,
+        9086,
+        9109,
+        9173,
+        9589,
+        9590,
+        9610,
+        9806
+      ],
+      "bug_reports": [
+        "bug-seed-100-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1165-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1328-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-146-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1549-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1575-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1772-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-18-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1857-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1879-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-1997-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2114-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2186-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2393-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2475-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2718-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2729-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-275-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2888-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-293-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2935-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-2952-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3061-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3067-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3114-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3171-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3193-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3322-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3465-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3492-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3548-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3581-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3615-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3729-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3760-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3762-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3871-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-394-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4012-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4075-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-410-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-411-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4222-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4243-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4360-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4429-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-465-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5042-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5296-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5516-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5585-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5632-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5673-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5842-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6099-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6212-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-631-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6312-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6380-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6386-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-645-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6567-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6770-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6803-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6811-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6936-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7083-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7087-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7094-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7275-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7424-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-748-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7544-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7707-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7843-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7932-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8095-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8122-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8137-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8209-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8319-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8335-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8363-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8619-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8628-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8925-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9086-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9109-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9173-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9589-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9590-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9610-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-962-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9806-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-bind-46",
+      "seeds": [
+        100,
+        3760,
+        7843
+      ],
+      "bug_reports": [
+        "bug-seed-100-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3760-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-7843-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-floordiv-21",
+      "seeds": [
+        5974,
+        9565,
+        9778
+      ],
+      "bug_reports": [
+        "bug-seed-5974-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9565-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9778-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-0",
+      "seeds": [
+        5176
+      ],
+      "bug_reports": [
+        "bug-seed-5176-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-19",
+      "seeds": [
+        7691
+      ],
+      "bug_reports": [
+        "bug-seed-7691-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-24",
+      "seeds": [
+        7817
+      ],
+      "bug_reports": [
+        "bug-seed-7817-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-34",
+      "seeds": [
+        962,
+        3193,
+        3729,
+        4012,
+        8335,
+        9589
+      ],
+      "bug_reports": [
+        "bug-seed-3193-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-3729-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-4012-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8335-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9589-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-962-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-39",
+      "seeds": [
+        2884,
+        8981
+      ],
+      "bug_reports": [
+        "bug-seed-2884-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8981-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-fuse-53",
+      "seeds": [
+        5802
+      ],
+      "bug_reports": [
+        "bug-seed-5802-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-nvrtc-8",
+      "seeds": [
+        5974,
+        9565,
+        9778
+      ],
+      "bug_reports": [
+        "bug-seed-5974-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9565-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9778-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-tvmcf-max",
+      "seeds": [
+        1328,
+        5296,
+        6380
+      ],
+      "bug_reports": [
+        "bug-seed-1328-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-5296-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-6380-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    },
+    {
+      "pattern_id": "neu-tvmcf-min",
+      "seeds": [
+        4854,
+        8363,
+        9565
+      ],
+      "bug_reports": [
+        "bug-seed-4854-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-8363-Symptom.EXCEPTION-Stage.COMPILATION",
+        "bug-seed-9565-Symptom.EXCEPTION-Stage.COMPILATION"
+      ]
+    }
+  ],
+  "validation": {
+    "total_archived_reports": 127,
+    "with_gir": 127,
+    "matched_reports": 104,
+    "rewritten_reports": 83,
+    "rewritten_without_remaining_pattern": 83
+  }
+}

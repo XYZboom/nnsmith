@@ -199,6 +199,8 @@ def parse_dtype_matcher(obj: Any) -> DtypeMatcher:
     if isinstance(obj, str):
         return DtypeExact(obj)
     if isinstance(obj, dict):
+        if '$eq' in obj:
+            return DtypeExact(str(obj['$eq']))
         if '$in' in obj:
             return DtypeInList([str(v) for v in obj['$in']])
     return DtypeAny()
@@ -402,38 +404,52 @@ class ValueRangeAny(ValueRangeMatcher):
 
 class ValueRangeContainsZero(ValueRangeMatcher):
     def matches(self, range_val):
-        return True  # 简化: 始终匹配
+        return range_val is not None and range_val[0] <= 0 <= range_val[1]
 
 
 class ValueRangeNonNegative(ValueRangeMatcher):
     def matches(self, range_val):
-        return True
+        return range_val is not None and range_val[0] >= 0
 
 
 class ValueRangeNonPositive(ValueRangeMatcher):
     def matches(self, range_val):
-        return True
+        return range_val is not None and range_val[1] <= 0
 
 
 class ValueRangeEq(ValueRangeMatcher):
     def __init__(self, value: float):
         self.value = value
     def matches(self, range_val):
-        return True
+        return range_val is not None and range_val[0] == self.value == range_val[1]
 
 
 class ValueRangeLt(ValueRangeMatcher):
     def __init__(self, value: float):
         self.value = value
     def matches(self, range_val):
-        return True
+        return range_val is not None and range_val[1] < self.value
 
 
 class ValueRangeGt(ValueRangeMatcher):
     def __init__(self, value: float):
         self.value = value
     def matches(self, range_val):
-        return True
+        return range_val is not None and range_val[0] > self.value
+
+
+class ValueRangeOutside(ValueRangeMatcher):
+    """Match when a conservative interval may exceed [lower, upper]."""
+
+    def __init__(self, lower: float, upper: float):
+        self.lower = lower
+        self.upper = upper
+
+    def matches(self, range_val):
+        return (
+            range_val is not None
+            and (range_val[0] < self.lower or range_val[1] > self.upper)
+        )
 
 
 def parse_value_range_matcher(obj: Any) -> ValueRangeMatcher:
@@ -458,4 +474,7 @@ def parse_value_range_matcher(obj: Any) -> ValueRangeMatcher:
             return ValueRangeLt(float(obj['$lt']))
         if '$gt' in obj:
             return ValueRangeGt(float(obj['$gt']))
+        if '$outside' in obj:
+            lower, upper = obj['$outside']
+            return ValueRangeOutside(float(lower), float(upper))
     return ValueRangeAny()

@@ -8,8 +8,10 @@ normalizes nnsmith's GraphIR, and matches against known bug patterns.
 Usage:
     from nnsmith.dedup import DedupMatcher
     matcher = DedupMatcher(pattern_dir="...")
-    if matcher.matches(gir):
-        ...  # skip this program
+    matched = matcher.matches(gir)
+    if matched:
+        from nnsmith.dedup.rewrite import rewrite_gir
+        gir = rewrite_gir(gir, matcher) or gir  # same seed/GIR; never skip or regenerate
 """
 
 from nnsmith.dedup.matcher import DedupMatcher

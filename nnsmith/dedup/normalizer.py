@@ -239,11 +239,14 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
             if arg_name in vars_map:
                 t = vars_map[arg_name]
                 input_info.append({
+                    'var_id': str(arg_name),
                     'shape': _shape_to_list(t.shape),
                     'dtype': _dtype_to_str(t.dtype),
                 })
             else:
-                input_info.append({'shape': [], 'dtype': 'unknown'})
+                input_info.append({
+                    'var_id': str(arg_name), 'shape': [], 'dtype': 'unknown'
+                })
 
         # Output shapes/dtypes
         output_info = []
@@ -252,11 +255,14 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
             if vname in vars_map:
                 t = vars_map[vname]
                 output_info.append({
+                    'var_id': str(vname),
                     'shape': _shape_to_list(t.shape),
                     'dtype': _dtype_to_str(t.dtype),
                 })
             else:
-                output_info.append({'shape': [], 'dtype': 'unknown'})
+                output_info.append({
+                    'var_id': str(vname), 'shape': [], 'dtype': 'unknown'
+                })
 
         nodes.append({
             'op': pattern_op,
@@ -267,3 +273,56 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
         })
 
     return nodes
+
+
+def normalize_node_dict(
+    candidate_op: Any,
+    input_vars: List[str],
+    otensors: List[Any],
+    backend: str = 'torch',
+    output_vars: Optional[List[str]] = None,
+) -> dict:
+    """Normalize an uncommitted candidate node during graph generation."""
+    op_name = get_op_name(candidate_op)
+    pattern_op = NNSMITH_TO_PATTERN_OP.get(op_name, op_name.upper())
+
+    attrs = {}
+    if hasattr(candidate_op, 'extra_attrs') and candidate_op.extra_attrs:
+        for k, v in candidate_op.extra_attrs.items():
+            mapped_k = NNSMITH_ATTR_MAP.get(k, k)
+            attrs[mapped_k] = v
+    if hasattr(candidate_op, '__dict__'):
+        for k in ['kernel_h_size', 'kernel_w_size', 'stride', 'padding',
+                  'dilation_h', 'dilation_w', 'in_channels', 'out_channels',
+                  'kernel_size', 'stride_h', 'stride_w', 'padding_h', 'padding_w']:
+            if k in candidate_op.__dict__:
+                mapped_k = NNSMITH_ATTR_MAP.get(k, k)
+                attrs[mapped_k] = candidate_op.__dict__[k]
+
+    input_info = []
+    for var in input_vars:
+        input_info.append({
+            'var_id': str(var),
+            'shape': [],
+            'dtype': 'unknown',
+        })
+
+    output_info = []
+    for idx, ot in enumerate(otensors):
+        shape = getattr(ot, 'shape', [])
+        dtype = getattr(ot, 'dtype', 'unknown')
+        ref = {
+            'shape': _shape_to_list(shape),
+            'dtype': _dtype_to_str(dtype),
+        }
+        if output_vars is not None and idx < len(output_vars):
+            ref['var_id'] = str(output_vars[idx])
+        output_info.append(ref)
+
+    return {
+        'op': pattern_op,
+        'attrs': attrs,
+        'inputs': input_info,
+        'outputs': output_info,
+        'raw_op': op_name,
+    }

@@ -2,85 +2,119 @@
   "format_version": "1.0",
   "patterns": [
     {
-      "id": "pt-inductor-reducemin-concat-int",
+      "id": "pt-inductor-fp16-fused-arith-chain",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CppCompileError: ReduceMin feeding Concat on integer tensors produces malformed C++ kernel indexing",
-      "severity": "crash",
+      "description": "Inductor CPU precision inconsistency: chained float16 arithmetic or concat operations upcast to fp32 in fused C++ kernel exceeding half precision tolerance",
+      "severity": "silent_correctness",
       "nodes": [
         {
-          "match": "node", "id": "n0", "op": "REDUCE_MIN",
-          "inputs": ["v_in"],
-          "outputs": ["v_red"],
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT",
+              "MULTIPLY",
+              "DIVIDE",
+              "CONCAT"
+            ]
+          },
+          "inputs": [
+            "v_in0"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
           "attrs": {}
         },
         {
-          "match": "node", "id": "n1", "op": {"$in": ["CONCAT", "CONCAT1", "CONCAT2", "CONCAT3", "CONCAT4", "CONCAT5"]},
-          "inputs": ["v_red"],
-          "outputs": ["v_out"],
+          "match": "node",
+          "id": "n1",
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT",
+              "MULTIPLY",
+              "DIVIDE",
+              "CONCAT"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
       "values": [
         {
-          "match": "value", "id": "v_in",
-          "ndim": {"$gte": 2},
-          "dtype": {"$in": ["int16", "int32", "int64"]}
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
         }
       ]
     },
     {
-      "id": "pt-inductor-fp16-softmax-floor",
+      "id": "pt-inductor-fp16-arith-rounding",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor precision inconsistency: Softmax followed by Floor truncation on float16 tensors",
+      "description": "Inductor CPU precision inconsistency: float16 arithmetic or reduction fused into integer rounding (floor/ceil/round/trunc)",
       "severity": "silent_correctness",
       "nodes": [
         {
-          "match": "node", "id": "n0", "op": "SOFTMAX",
-          "inputs": ["v_in"],
-          "outputs": ["v_sm"],
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT",
+              "MULTIPLY",
+              "DIVIDE",
+              "REDUCE_SUM",
+              "REDUCE_MEAN",
+              "SOFTMAX"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
           "attrs": {}
         },
         {
-          "match": "node", "id": "n1", "op": "FLOOR",
-          "inputs": ["v_sm"],
-          "outputs": ["v_out"],
+          "match": "node",
+          "id": "n1",
+          "op": {
+            "$in": [
+              "FLOOR",
+              "CEIL",
+              "ROUND",
+              "TRUNC"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
       "values": [
         {
-          "match": "value", "id": "v_in",
-          "ndim": {"$gte": 2},
-          "dtype": "float16"
-        }
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-reducesum-floor",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor precision inconsistency: ReduceSum followed by Floor truncation on float16 tensors",
-      "severity": "silent_correctness",
-      "nodes": [
-        {
-          "match": "node", "id": "n0", "op": "REDUCE_SUM",
-          "inputs": ["v_in"],
-          "outputs": ["v_sum"],
-          "attrs": {}
-        },
-        {
-          "match": "node", "id": "n1", "op": "FLOOR",
-          "inputs": ["v_sum"],
-          "outputs": ["v_out"],
-          "attrs": {}
-        }
-      ],
-      "values": [
-        {
-          "match": "value", "id": "v_in",
-          "ndim": {"$gte": 2},
+          "match": "value",
+          "id": "v_mid",
+          "ndim": {
+            "$gte": 2
+          },
           "dtype": "float16"
         }
       ]
@@ -93,16 +127,31 @@
       "severity": "silent_correctness",
       "nodes": [
         {
-          "match": "node", "id": "n0", "op": {"$in": ["BICUBIC_INTERP", "TRILINEAR_INTERP", "BILINEAR_INTERP"]},
-          "inputs": ["v_in"],
-          "outputs": ["v_out"],
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "BICUBIC_INTERP",
+              "TRILINEAR_INTERP",
+              "BILINEAR_INTERP"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
       "values": [
         {
-          "match": "value", "id": "v_in",
-          "ndim": {"$gte": 3},
+          "match": "value",
+          "id": "v_in",
+          "ndim": {
+            "$gte": 3
+          },
           "dtype": "float16"
         }
       ]
@@ -115,25 +164,406 @@
       "severity": "crash",
       "nodes": [
         {
-          "match": "node", "id": "n0", "op": "LOG",
-          "inputs": ["v_in"],
-          "outputs": ["v_log"],
+          "match": "node",
+          "id": "n0",
+          "op": "LOG",
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_log"
+          ],
           "attrs": {}
         },
         {
-          "match": "node", "id": "n1", "op": "REDUCE_SUM",
-          "inputs": ["v_log"],
-          "outputs": ["v_out"],
+          "match": "node",
+          "id": "n1",
+          "op": "REDUCE_SUM",
+          "inputs": [
+            "v_log"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {
-            "dtype": {"$eq": "int32"}
+            "dtype": {
+              "$eq": "int32"
+            }
           }
         }
       ],
       "values": [
         {
-          "match": "value", "id": "v_in",
-          "ndim": {"$gte": 1},
+          "match": "value",
+          "id": "v_in",
+          "ndim": {
+            "$gte": 1
+          },
           "dtype": "float32"
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-int-clip-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor C++ codegen bug: integer CLIP/MINIMUM/MAXIMUM on int8/int16 causes type deduction failure in min/max_propagate_nan",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "CLIP",
+              "MINIMUM",
+              "MAXIMUM"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "dtype": {
+            "$in": [
+              "int8",
+              "int16"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-argminmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor C++ codegen bug: int16 argmin/argmax causes type deduction failure in argmin/argmax_combine (short int vs int)",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "ARGMIN",
+              "ARGMAX"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "dtype": {
+            "$eq": "int16"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-int-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "REDUCE_MIN",
+              "REDUCE_MAX"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "dtype": {
+            "$in": [
+              "int8",
+              "uint8",
+              "int16"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-multi-reduction-decl",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU conflicting declaration for multiple reductions on same float16 tensor",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "REDUCE_SUM",
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out0"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "REDUCE_SUM",
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out1"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_src",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-trans-to-trans",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU float16 transcendental operation feeding transcendental operation",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS",
+              "ATAN"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS",
+              "ATAN"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-trans-rounding",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU float16 transcendental operation feeding FLOOR/CEIL/ROUND/TRUNC",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS",
+              "ATAN"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {
+            "$in": [
+              "FLOOR",
+              "CEIL",
+              "ROUND",
+              "TRUNC"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-trans-cast-int",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU float16 transcendental operation feeding int32/int64 cast",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS",
+              "ATAN"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "CAST",
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$in": [
+              "int32",
+              "int64"
+            ]
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
         }
       ]
     }

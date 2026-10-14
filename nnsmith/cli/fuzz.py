@@ -86,9 +86,9 @@ def resolve_fuzz_seeds(explicit_seeds, seed_file):
 
 
 class StatusCollect:
-    def __init__(self, root):
+    def __init__(self, root, yes=True):
         self.root = Path(root)
-        mkdir(self.root)
+        mkdir(self.root, yes=yes)
         self.n_testcases = 0
         self.n_bugs = 0
         self.n_fail_make_test = 0
@@ -297,37 +297,30 @@ class FuzzingLoop:
             timeout_ms=mgen_cfg["timeout_ms"],
             rank_choices=mgen_cfg["rank_choices"],
             dtype_choices=mgen_cfg["dtype_choices"],
+            dedup_matcher=self.dedup_matcher,
         )
         return gen.make_concrete()
 
     def make_testcase(self, seed) -> TestCase:
+        prev_prevented = getattr(self.dedup_matcher, 'prevented_count', 0) if self.dedup_matcher else 0
+        prev_pattern_hits = dict(getattr(self.dedup_matcher, 'prevented_by_pattern', {})) if self.dedup_matcher else {}
         ir = self.make_concrete_gir(seed)
+        curr_prevented = getattr(self.dedup_matcher, 'prevented_count', 0) if self.dedup_matcher else 0
 
-        # Pre-dedup rewrites this exact program. It never replaces the program
-        # with another seed and never skips it.
-        if self.dedup_matcher is not None:
-            try:
-                matched = self.dedup_matcher.matches(ir)
-                if matched:
-                    pids = ", ".join(p.id for p in matched)
-                    from nnsmith.dedup.rewrite import rewrite_gir
-
-                    rewritten_ir = rewrite_gir(ir, self.dedup_matcher)
-                    if rewritten_ir is not None:
-                        ir = rewritten_ir
-                        self.n_dedup_rewrite += 1
-                        FUZZ_LOG.info(
-                            f"Pre-dedup rewrote seed {seed} to avoid [{pids}]"
-                        )
-                    else:
-                        self.n_dedup_rewrite_fail += 1
-                        FUZZ_LOG.info(
-                            f"Pre-dedup rewrite failed for seed {seed} ([{pids}]); "
-                            "keeping the original program"
-                        )
-            except Exception:
-                self.n_dedup_rewrite_fail += 1
-                FUZZ_LOG.exception(f"Pre-dedup failed for seed {seed}; keeping the original program")
+        if curr_prevented > prev_prevented:
+            n_intercepted = curr_prevented - prev_prevented
+            curr_pattern_hits = dict(getattr(self.dedup_matcher, 'prevented_by_pattern', {}))
+            pattern_hits = {
+                pattern_id: count - prev_pattern_hits.get(pattern_id, 0)
+                for pattern_id, count in curr_pattern_hits.items()
+                if count > prev_pattern_hits.get(pattern_id, 0)
+            }
+            self.n_dedup_rewrite += n_intercepted
+            FUZZ_LOG.info(
+                f"Pre-dedup: seed {seed} intercepted {n_intercepted} bug pattern "
+                f"node(s) during generation; pattern_hits={json.dumps(pattern_hits, sort_keys=True)} "
+                f"(resampled without seed change)"
+            )
 
         model = self.ModelType.from_gir(ir)
         if self.cfg["debug"]["viz"]:
@@ -370,7 +363,12 @@ class FuzzingLoop:
             else:
                 seed = random.getrandbits(32)
             attempt_index += 1
-            FUZZ_LOG.debug(f"Making testcase with seed: {seed}")
+            if self.specific_seeds is not None:
+                FUZZ_LOG.info(
+                    f"Explicit seed start: index={attempt_index}/{len(self.specific_seeds)} seed={seed}"
+                )
+            else:
+                FUZZ_LOG.debug(f"Making testcase with seed: {seed}")
 
             time_stat = {}
 
@@ -385,11 +383,16 @@ class FuzzingLoop:
                 )
                 FUZZ_LOG.error(traceback.format_exc())
                 self.status.n_fail_make_test += 1
+                if self.specific_seeds is not None:
+                    FUZZ_LOG.info(
+                        f"Explicit seed finished: index={attempt_index}/{len(self.specific_seeds)} seed={seed} status=make_testcase_failed"
+                    )
                 continue
             time_stat["gen"] = time.time() - gen_start
 
             eval_start = time.time()
-            if not self.validate_and_report(testcase):
+            validation_succeeded = self.validate_and_report(testcase)
+            if not validation_succeeded:
                 FUZZ_LOG.warning(f"Failed model seed: {seed}")
             time_stat["eval"] = time.time() - eval_start
 
@@ -415,14 +418,18 @@ class FuzzingLoop:
             FUZZ_LOG.info(
                 f"Timing: { ''.join(f'{k}: {1000 * v:.1f}ms, ' for k, v in time_stat.items()) }"
             )
+            if self.specific_seeds is not None:
+                status = "completed" if validation_succeeded else "bug"
+                FUZZ_LOG.info(
+                    f"Explicit seed finished: index={attempt_index}/{len(self.specific_seeds)} seed={seed} status={status}"
+                )
             self.status.n_testcases += 1
         FUZZ_LOG.info(f"Total {self.status.n_testcases} testcases generated.")
         FUZZ_LOG.info(f"Total {self.status.n_bugs} bugs found.")
         FUZZ_LOG.info(f"Total {self.status.n_fail_make_test} failed to make testcases.")
         if self.n_dedup_rewrite > 0 or self.n_dedup_rewrite_fail > 0:
             FUZZ_LOG.info(
-                f"Total {self.n_dedup_rewrite} testcases rewritten by pre-dedup; "
-                f"{self.n_dedup_rewrite_fail} rewrite failed (kept as-is)."
+                f"Total {self.n_dedup_rewrite} candidate nodes intercepted by pre-dedup."
             )
 
 

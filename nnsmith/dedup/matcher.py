@@ -2,6 +2,7 @@
 PatternMatcher — matches normalized nnsmith GraphIR nodes against PatternDefs.
 """
 
+from collections import Counter
 from typing import Any, Dict, List, Optional, Set
 
 from nnsmith.dedup.constraints import (
@@ -53,12 +54,15 @@ class PatternMatcher:
             else:
                 self.multi_op_patterns.append(p)
 
-    def match(self, nodes: List[dict]) -> List[PatternDef]:
-        """Match a list of normalized nodes against all patterns. Returns matched patterns."""
+    def match(
+        self, nodes: List[dict], required_node: Optional[dict] = None
+    ) -> List[PatternDef]:
+        """Match patterns, optionally requiring an occurrence to contain one node."""
         matched = []
 
         # Single-op patterns: straightforward
-        for node in nodes:
+        candidate_nodes = [required_node] if required_node is not None else nodes
+        for node in candidate_nodes:
             op = node['op']
             if op in self.single_op_patterns:
                 for pattern in self.single_op_patterns[op]:
@@ -69,7 +73,7 @@ class PatternMatcher:
         for pattern in self.multi_op_patterns:
             if pattern in matched:
                 continue
-            if self._check_multi_op(pattern, nodes):
+            if self._check_multi_op(pattern, nodes, required_node=required_node):
                 matched.append(pattern)
 
         return matched
@@ -107,34 +111,28 @@ class PatternMatcher:
 
         return True
 
-    def _check_multi_op(self, pattern: PatternDef, all_nodes: List[dict]) -> bool:
+    def _check_multi_op(
+        self,
+        pattern: PatternDef,
+        all_nodes: List[dict],
+        required_node: Optional[dict] = None,
+    ) -> bool:
         """Check multi-op pattern by matching pattern nodes as a SUBSEQUENCE of
         all_nodes (skipping unrelated nodes in between, e.g. dead code).
 
-        For each starting position, greedily advance through all_nodes matching
-        each pattern node in order. Flow constraints then verify dataflow.
+        Enumerate structural subsequences so a required candidate can occupy any
+        pattern position. Flow constraints then verify exact dataflow.
         """
         n = len(pattern.nodes)
         if n > len(all_nodes):
             return False
 
-        for start in range(len(all_nodes)):
-            # Greedy subsequence match starting at `start`
-            window = []
-            ni = 0  # index into pattern.nodes
-            for i in range(start, len(all_nodes)):
-                if ni >= n:
-                    break
-                actual = all_nodes[i]
-                pnode = pattern.nodes[ni]
-                if self._op_matches(actual['op'], pnode.op) and self._check_attrs(actual, pnode):
-                    window.append(actual)
-                    ni += 1
-            if ni < n:
-                continue  # not all pattern nodes matched as subsequence
-
+        def occurrence_matches(window: List[dict]) -> bool:
+            if required_node is not None and all(
+                node is not required_node for node in window
+            ):
+                return False
             # Pattern matched structurally. Check value constraints.
-            match = True
             for vid, pval in pattern.values.items():
                 actual_ref = self._find_actual_ref(vid, pattern, window, all_nodes)
                 if actual_ref is None:
@@ -144,23 +142,33 @@ class PatternMatcher:
                         and isinstance(pval.range, ValueRangeAny)
                         and not pval.expression_constraints):
                         continue
-                    match = False
-                    break
+                    return False
                 if not self._check_value(pval, actual_ref):
-                    match = False
-                    break
-
-            if not match:
-                continue
+                    return False
 
             if not self._check_graph_constraints(pattern, len(all_nodes), all_nodes):
-                continue
+                return False
             if not self._check_flow_constraints(pattern, window):
-                continue
+                return False
 
             return True
 
-        return False
+        def search(node_idx: int, pattern_idx: int, window: List[dict]) -> bool:
+            if pattern_idx == n:
+                return occurrence_matches(window)
+            remaining = n - pattern_idx
+            for idx in range(node_idx, len(all_nodes) - remaining + 1):
+                actual = all_nodes[idx]
+                pnode = pattern.nodes[pattern_idx]
+                if not self._op_matches(actual['op'], pnode.op):
+                    continue
+                if not self._check_attrs(actual, pnode):
+                    continue
+                if search(idx + 1, pattern_idx + 1, window + [actual]):
+                    return True
+            return False
+
+        return search(0, 0, [])
 
     def _check_value(self, pval: PatternValueDef, actual_ref: dict) -> bool:
         """Check shape, ndim, dtype, expression constraints on a value reference."""
@@ -185,6 +193,12 @@ class PatternMatcher:
         # Check dtype
         if not isinstance(pval.dtype, DtypeAny):
             if not pval.dtype.matches(actual_ref['dtype'], 0):
+                return False
+
+        # Check conservative value interval. Unknown intervals must not satisfy
+        # a constrained range matcher.
+        if not isinstance(pval.range, ValueRangeAny):
+            if not pval.range.matches(actual_ref.get('range')):
                 return False
 
         # Check expression constraints
@@ -267,10 +281,12 @@ class PatternMatcher:
                 return False
             if constraint.to_input >= len(to_node['inputs']):
                 return False
-            # Flow constraint: check shape compatibility
-            from_shape = from_node['outputs'][constraint.from_output]['shape']
-            to_shape = to_node['inputs'][constraint.to_input]['shape']
-            if from_shape != to_shape:
+            from_ref = from_node['outputs'][constraint.from_output]
+            to_ref = to_node['inputs'][constraint.to_input]
+            from_var = from_ref.get('var_id')
+            to_var = to_ref.get('var_id')
+            # Missing identity cannot prove dataflow; fail closed.
+            if from_var is None or to_var is None or from_var != to_var:
                 return False
         return True
 
@@ -280,9 +296,13 @@ class DedupMatcher:
     High-level dedup matcher: loads patterns, normalizes GraphIR, checks matches.
 
     Usage:
+        from nnsmith.dedup.rewrite import rewrite_gir
         matcher = DedupMatcher(pattern_dir="/path/to/patterns/")
-        if matcher.matches(gir):
-            print("Matched, skip this program")
+        matched = matcher.matches(gir)
+        if matched:
+            # Locally rewrite this same GIR; never skip it or regenerate by seed.
+            rewritten = rewrite_gir(gir, matcher)
+            gir = rewritten or gir
     """
 
     def __init__(self, pattern_dir: str = None,
@@ -295,6 +315,8 @@ class DedupMatcher:
         self.target = target
         self.backend = backend
         self.patterns = []
+        self.prevented_count = 0
+        self.prevented_by_pattern = Counter()
 
         if pattern_dir:
             import os
@@ -326,3 +348,60 @@ class DedupMatcher:
     def match_count(self, ir) -> int:
         """Return the number of matched patterns."""
         return len(self.matches(ir))
+
+    def match_first(self, ir) -> Optional[PatternDef]:
+        matched = self.matches(ir)
+        return matched[0] if matched else None
+
+    def on_node_generated(
+        self,
+        gir: Any,
+        candidate_op: Any,
+        input_vars: List[str],
+        otensors: List[Any],
+        output_vars: Optional[List[str]] = None,
+        input_tensors: Optional[List[Any]] = None,
+    ) -> Optional[PatternDef]:
+        """aiFuzzer-style online check: evaluate candidate node before committing to graph."""
+        if not self.patterns:
+            return None
+        from nnsmith.dedup.normalizer import normalize_graph, normalize_node_dict
+        nodes = normalize_graph(gir, backend=self.backend)
+        cand_node = normalize_node_dict(
+            candidate_op,
+            input_vars,
+            otensors,
+            backend=self.backend,
+            output_vars=output_vars,
+        )
+        vars_map = dict(gir.vars)
+        for idx, var_id in enumerate(input_vars):
+            tensor = vars_map.get(var_id)
+            if tensor is None and input_tensors is not None and idx < len(input_tensors):
+                tensor = input_tensors[idx]
+            if tensor is not None:
+                from nnsmith.dedup.normalizer import _dtype_to_str, _shape_to_list
+                cand_node['inputs'][idx]['shape'] = _shape_to_list(tensor.shape)
+                cand_node['inputs'][idx]['dtype'] = _dtype_to_str(tensor.dtype)
+
+        if output_vars:
+            output_set = set(output_vars)
+            insert_at = next(
+                (
+                    idx
+                    for idx, node in enumerate(nodes)
+                    if any(ref.get('var_id') in output_set for ref in node['inputs'])
+                ),
+                len(nodes),
+            )
+            nodes.insert(insert_at, cand_node)
+        else:
+            nodes.append(cand_node)
+
+        cand_matches = self.matcher.match(nodes, required_node=cand_node)
+        if cand_matches:
+            matched = cand_matches[0]
+            self.prevented_count += 1
+            self.prevented_by_pattern[matched.id] += 1
+            return matched
+        return None

@@ -147,12 +147,15 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
             break
     if first_pat is None:
         first_pat = matched[0]
-    # 在选定 pattern 节点里优先选 reduce/matmul，否则用第一个节点
+    # Prefer the terminal node of a multi-node pattern. For chains such as
+    # Softmax -> Floor and ReduceSum -> Floor, rewriting the terminal Floor
+    # directly breaks the buggy fusion. Rewriting Softmax or ReduceSum can
+    # preserve the same backend numerical discrepancy or fail materialization.
     target_op = None
-    for n in first_pat.nodes:
+    for n in reversed(first_pat.nodes):
         for op in _pattern_ops(n.op):
             nm = PATTERN_TO_NNSMITH.get(op)
-            if nm and (nm.startswith('Reduce') or nm == 'MatMul'):
+            if nm and _candidates_for(nm) and _find_trigger_inst(gir, op) is not None:
                 target_op = op
                 break
         if target_op is not None:
