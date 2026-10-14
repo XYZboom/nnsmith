@@ -6,7 +6,11 @@ import unittest
 
 from nnsmith.cli.fuzz import FuzzingLoop
 from nnsmith.dedup import DedupMatcher
-from nnsmith.dedup.constraints import DtypeExact, ValueRangeOutside
+from nnsmith.dedup.constraints import (
+    DtypeExact,
+    ExpressionConstraint,
+    ValueRangeOutside,
+)
 from nnsmith.dedup.matcher import PatternMatcher
 from nnsmith.dedup.parser import (
     FlowConstraint,
@@ -165,6 +169,12 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 'pt-inductor-complex-mul-cast-softmax-ge-crash',
             'worker_0/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-238':
                 'pt-inductor-complex-mul-slice-cast-softmax-ge-crash',
+            'worker_0/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-51':
+                'pt-inductor-complex-where-concat-pointwise-stride-crash',
+            'worker_0/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-78':
+                'pt-inductor-complex-where-pointwise-stride-crash',
+            'worker_1/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-93':
+                'pt-inductor-complex-where-squeeze-pointwise-stride-crash',
         }
         if not all((PYTORCH_V5_DIR / rel / 'gir.pkl').exists() for rel in samples):
             self.skipTest('Archived PyTorch v5 GIR files are not available')
@@ -291,6 +301,12 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertTrue(
             matcher._check_value(value, {**base_ref, 'range': (-16.0, 70000.0)})
         )
+
+    def test_expression_constraints_fail_closed_on_symbolic_dimensions(self):
+        constraint = ExpressionConstraint([-1], 'add', {1})
+
+        self.assertTrue(constraint.matches([2, 1]))
+        self.assertFalse(constraint.matches([2, object()]))  # type: ignore[list-item]
 
     def test_fuzz_log_records_pattern_ids_without_seed_retry(self):
         source = inspect.getsource(FuzzingLoop.make_testcase)

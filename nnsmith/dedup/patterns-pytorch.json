@@ -522,6 +522,132 @@
       ]
     },
     {
+      "id": "pt-inductor-complex-where-pointwise-stride-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor fallback crashes when a broadcast complex Where output with trailing dimension one feeds Add or Sub",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "WHERE",
+          "inputs": ["v_cond", "v_true", "v_false"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {"$in": ["ADD", "SUBTRACT"]},
+          "inputs": ["v_complex"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_complex",
+          "ndim": {"$gte": 2},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-complex-where-concat-pointwise-stride-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor fallback crashes when a broadcast complex Where output with trailing dimension one passes through Concat into Add or Sub",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "WHERE",
+          "inputs": ["v_cond", "v_true", "v_false"],
+          "outputs": ["v_where"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "CONCAT",
+          "inputs": ["v_where"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": {"$in": ["ADD", "SUBTRACT"]},
+          "inputs": ["v_complex"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_complex",
+          "ndim": {"$gte": 2},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-complex-where-squeeze-pointwise-stride-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor fallback crashes when a broadcast complex Where output with trailing dimension one passes through Squeeze into Add or Sub",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "WHERE",
+          "inputs": ["v_cond", "v_true", "v_false"],
+          "outputs": ["v_where"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "SQUEEZE",
+          "inputs": ["v_where"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": {"$in": ["ADD", "SUBTRACT"]},
+          "inputs": ["v_complex"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_complex",
+          "ndim": {"$gte": 2},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
       "id": "pt-inductor-fp16-trans-to-trans",
       "compiler": "pytorch",
       "target": "cpu",

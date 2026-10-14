@@ -327,6 +327,11 @@ class ExpressionConstraint:
             raw = dims[idx]
             if raw is None:
                 return None
+            try:
+                raw = int(raw)
+            except (TypeError, ValueError):
+                # Symbolic dimensions cannot prove a concrete expression.
+                return None
             dv = self.divisors[i] if self.divisors and i < len(self.divisors) else 1
             values.append(raw // dv)
         if self.op == 'mul':
