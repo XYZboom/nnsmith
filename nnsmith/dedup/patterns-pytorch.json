@@ -594,6 +594,67 @@
       ]
     },
     {
+      "id": "pt-inductor-complex-transpose-reduce-transpose-mul-stride-assert",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor emits an invalid output stride assertion when a complex transpose is reduced, transposed again, and multiplied with its unreduced source",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "TRANSPOSE",
+          "inputs": ["v_src"],
+          "outputs": ["v_first"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "REDUCE_SUM",
+          "inputs": ["v_first"],
+          "outputs": ["v_reduce"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "TRANSPOSE",
+          "inputs": ["v_reduce"],
+          "outputs": ["v_second"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n3",
+          "op": "MULTIPLY",
+          "inputs": ["v_first", "v_second"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_first",
+          "ndim": {"$gte": 4},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        },
+        {
+          "match": "value",
+          "id": "v_second",
+          "ndim": {"$gte": 3},
+          "dtype": {"$in": ["complex64", "complex128"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n3", "toInput": 0},
+        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 1}
+      ]
+    },
+    {
       "id": "pt-inductor-reshape-replicate-pad-symbolic-range-crash",
       "compiler": "pytorch",
       "target": "cpu",
