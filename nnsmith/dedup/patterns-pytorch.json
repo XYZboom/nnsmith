@@ -317,34 +317,83 @@
       ]
     },
     {
-      "id": "pt-inductor-fp16-multi-reduction-decl",
+      "id": "pt-inductor-fp16-softmax-squeeze-reduce-max-duplicate-decl",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU conflicting declaration for multiple reductions on same float16 tensor",
+      "description": "Inductor CPU duplicate Half accumulator declaration for float16 softmax output squeezed then reduced by maximum",
       "severity": "crash",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": "REDUCE_SUM",
-          "inputs": [
-            "v_src"
-          ],
-          "outputs": [
-            "v_out0"
-          ],
+          "op": "SOFTMAX",
+          "inputs": ["v_in"],
+          "outputs": ["v_softmax"],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
-          "op": "REDUCE_SUM",
-          "inputs": [
-            "v_src"
-          ],
-          "outputs": [
-            "v_out1"
-          ],
+          "op": "SQUEEZE",
+          "inputs": ["v_softmax"],
+          "outputs": ["v_src"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "REDUCE_MAX",
+          "inputs": ["v_src"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_softmax",
+          "dtype": {"$eq": "float16"}
+        },
+        {
+          "match": "value",
+          "id": "v_src",
+          "dtype": {"$eq": "float16"}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-cos-dual-reduce-min-duplicate-decl",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU duplicate Half accumulator declaration for two reduce-min outputs from one float16 cosine tensor",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "COS",
+          "inputs": ["v_in"],
+          "outputs": ["v_src"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "REDUCE_MIN",
+          "inputs": ["v_src"],
+          "outputs": ["v_out0"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "REDUCE_MIN",
+          "inputs": ["v_src"],
+          "outputs": ["v_out1"],
           "attrs": {}
         }
       ],
@@ -352,10 +401,124 @@
         {
           "match": "value",
           "id": "v_src",
-          "dtype": {
-            "$eq": "float16"
-          }
+          "dtype": {"$eq": "float16"}
         }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-complex-mul-cast-softmax-ge-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU complex multiply cast to real and consumed by softmax can emit unsupported complex ge comparison",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MULTIPLY",
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "CAST",
+          "inputs": ["v_complex"],
+          "outputs": ["v_real"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "SOFTMAX",
+          "inputs": ["v_real"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_complex",
+          "dtype": {"$in": ["complex64", "complex128"]}
+        },
+        {
+          "match": "value",
+          "id": "v_real",
+          "dtype": {"$in": ["float32", "float64"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-complex-mul-slice-cast-softmax-ge-crash",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU complex multiply sliced then cast to real and consumed by softmax can emit unsupported complex ge comparison",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MULTIPLY",
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_mul"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "SLICE",
+          "inputs": ["v_mul"],
+          "outputs": ["v_complex"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": "CAST",
+          "inputs": ["v_complex"],
+          "outputs": ["v_real"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n3",
+          "op": "SOFTMAX",
+          "inputs": ["v_real"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mul",
+          "dtype": {"$in": ["complex64", "complex128"]}
+        },
+        {
+          "match": "value",
+          "id": "v_complex",
+          "dtype": {"$in": ["complex64", "complex128"]}
+        },
+        {
+          "match": "value",
+          "id": "v_real",
+          "dtype": {"$in": ["float32", "float64"]}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
+        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 0}
       ]
     },
     {

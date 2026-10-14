@@ -20,6 +20,10 @@ from nnsmith.graph_gen import SymbolicGen
 DATA_DIR = Path('/home/xyzboom/Data/maybeBug/2026-09-24/neuri_tvm_cuda_10k')
 PATTERNS_FILE = Path('/home/xyzboom/Data/remote-2026-10-01/patterns-neu-compile/neu-compile.json')
 SEEDS_FILE = Path('/home/xyzboom/Code/aiCompiler/nnsmith-worktrees/neuri-tvm-prededup/nnsmith/dedup/known_bug_seeds_tvm_cuda.json')
+PYTORCH_V5_DIR = Path(
+    '/home/xyzboom/Data/maybeBug/2026-10-13/'
+    'neuri_pt2_5k_targeted_paired_v5/dedup'
+)
 
 class TestNeuriTvmCudaPrededup(unittest.TestCase):
     @classmethod
@@ -142,6 +146,38 @@ def _flow_pattern():
 
 
 class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
+    def test_precise_crash_patterns_match_archived_reports(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        samples = {
+            'worker_0/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-32':
+                'pt-inductor-fp16-softmax-squeeze-reduce-max-duplicate-decl',
+            'worker_0/run_1/bug-Symptom.EXCEPTION-Stage.EXECUTION-58':
+                'pt-inductor-fp16-cos-dual-reduce-min-duplicate-decl',
+            'worker_0/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-280':
+                'pt-inductor-complex-mul-cast-softmax-ge-crash',
+            'worker_0/run_0/bug-Symptom.EXCEPTION-Stage.EXECUTION-238':
+                'pt-inductor-complex-mul-slice-cast-softmax-ge-crash',
+        }
+        if not all((PYTORCH_V5_DIR / rel / 'gir.pkl').exists() for rel in samples):
+            self.skipTest('Archived PyTorch v5 GIR files are not available')
+
+        self.assertNotIn(
+            'pt-inductor-fp16-multi-reduction-decl',
+            {pattern.id for pattern in dedup.patterns},
+        )
+        for relative_path, expected_id in samples.items():
+            with (PYTORCH_V5_DIR / relative_path / 'gir.pkl').open('rb') as stream:
+                gir = pickle.load(stream)
+            self.assertIn(expected_id, {pattern.id for pattern in dedup.matches(gir)})
+
     def test_single_op_match_must_be_the_candidate(self):
         pattern = PatternDef(
             id='single-producer',
