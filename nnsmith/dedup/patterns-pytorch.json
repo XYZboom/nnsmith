@@ -1166,6 +1166,36 @@
           "toInput": 0
         }
       ]
+    },
+    {
+      "id": "pt-inductor-cpu-byte-matmul-broadcast-upcast",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU byte matmul with broadcast rhs lowers to int64 without casting back",
+      "severity": "inconsistency",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MATMUL",
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_lhs",
+          "dtype": {"$in": ["int8", "uint8"]}
+        },
+        {
+          "match": "value",
+          "id": "v_rhs",
+          "ndim": {"$gte": 3},
+          "dtype": {"$in": ["int8", "uint8"]}
+        }
+      ]
     }
   ]
 }
