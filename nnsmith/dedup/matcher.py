@@ -85,6 +85,8 @@ class PatternMatcher:
         # 1. Check attrs
         if not self._check_attrs(node, pnode):
             return False
+        if not self._check_node_input_constraints(node, pnode):
+            return False
 
         # 2. Check value constraints (by position)
         for vid, pval in pattern.values.items():
@@ -164,6 +166,8 @@ class PatternMatcher:
                     continue
                 if not self._check_attrs(actual, pnode):
                     continue
+                if not self._check_node_input_constraints(actual, pnode):
+                    continue
                 if search(idx + 1, pattern_idx + 1, window + [actual]):
                     return True
             return False
@@ -217,6 +221,33 @@ class PatternMatcher:
                     continue
                 return False
             if not matcher.matches(actual):
+                return False
+        return True
+
+    def _check_node_input_constraints(self, node: dict,
+                                      pnode: PatternNodeDef) -> bool:
+        """Check positional relations between input variable identities."""
+        inputs = node['inputs']
+        for constraint in pnode.input_constraints:
+            lhs = constraint.get('lhs')
+            rhs = constraint.get('rhs')
+            op = constraint.get('op')
+            if not isinstance(lhs, int) or not isinstance(rhs, int):
+                return False
+            if lhs < 0 or rhs < 0 or lhs >= len(inputs) or rhs >= len(inputs):
+                return False
+            lhs_var = inputs[lhs].get('var_id')
+            rhs_var = inputs[rhs].get('var_id')
+            # Missing identity cannot prove an input relation; fail closed.
+            if lhs_var is None or rhs_var is None:
+                return False
+            if op == 'var_ne':
+                if lhs_var == rhs_var:
+                    return False
+            elif op == 'var_eq':
+                if lhs_var != rhs_var:
+                    return False
+            else:
                 return False
         return True
 

@@ -265,19 +265,13 @@
       "id": "pt-inductor-int-clip-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor C++ codegen bug: integer CLIP/MINIMUM/MAXIMUM on int8/int16 causes type deduction failure in min/max_propagate_nan",
+      "description": "Inductor C++ codegen bug: integer CLIP on int8/int16 causes type deduction failure in min/max_propagate_nan",
       "severity": "crash",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "CLIP",
-              "MINIMUM",
-              "MAXIMUM"
-            ]
-          },
+          "op": "CLIP",
           "inputs": [
             "v_in"
           ],
@@ -297,6 +291,33 @@
               "int16"
             ]
           }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-int-minmax-distinct-inputs",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor C++ codegen bug: integer MINIMUM/MAXIMUM with distinct int8/int16 inputs causes type deduction failure in min/max_propagate_nan",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {"$in": ["MINIMUM", "MAXIMUM"]},
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_out"],
+          "attrs": {},
+          "inputConstraints": [
+            {"lhs": 0, "op": "var_ne", "rhs": 1}
+          ]
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_lhs",
+          "dtype": {"$in": ["int8", "int16"]}
         }
       ]
     },

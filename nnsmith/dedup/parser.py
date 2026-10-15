@@ -22,12 +22,14 @@ from nnsmith.dedup.constraints import (
 
 class PatternNodeDef:
     def __init__(self, id: str, op: str, inputs: List[str], outputs: List[str],
-                 attrs: Dict[str, AttrMatcher]):
+                 attrs: Dict[str, AttrMatcher],
+                 input_constraints: Optional[List[dict]] = None):
         self.id = id
         self.op = op
         self.inputs = inputs
         self.outputs = outputs
         self.attrs = attrs
+        self.input_constraints = input_constraints or []
 
 
 class PatternValueDef:
@@ -114,6 +116,7 @@ def parse_pattern_file(filepath: str) -> List[PatternDef]:
                 inputs=n_json.get('inputs', []),
                 outputs=n_json.get('outputs', []),
                 attrs=attrs,
+                input_constraints=n_json.get('inputConstraints', []),
             ))
         values = {}
         for v_json in p.get('values', []):

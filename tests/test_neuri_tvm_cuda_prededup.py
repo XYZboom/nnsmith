@@ -511,5 +511,43 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         node_i16_len1 = _pt_node('REDUCE_MIN', 'int16', 1)
         self.assertIn('pt-inductor-int16-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
 
+    def test_int_minmax_excludes_identical_inputs(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+
+        def ref(var_id):
+            return {'var_id': var_id, 'shape': [2, 3], 'dtype': 'int16'}
+
+        identical = {
+            'op': 'MINIMUM',
+            'attrs': {},
+            'inputs': [ref('v0'), ref('v0')],
+            'outputs': [ref('v1')],
+            'raw_op': 'MINIMUM',
+        }
+        distinct = {
+            **identical,
+            'inputs': [ref('v0'), ref('v2')],
+        }
+        missing_identity = {
+            **identical,
+            'inputs': [
+                {'shape': [2, 3], 'dtype': 'int16'},
+                {'shape': [2, 3], 'dtype': 'int16'},
+            ],
+        }
+
+        target = 'pt-inductor-int-minmax-distinct-inputs'
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([identical])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([missing_identity])})
+        self.assertIn(target, {p.id for p in dedup.matcher.match([distinct])})
+
 if __name__ == '__main__':
     unittest.main()
