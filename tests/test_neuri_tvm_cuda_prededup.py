@@ -432,5 +432,84 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertLess(check_at, candidate_commit_at)
         self.assertIn('output_vars=phvars', source)
 
+    def test_fp16_fused_arith_and_rounding_require_direct_flow(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        def _pt_node(op, inputs=(), outputs=(), dtype='float16', shape=(2, 3), attrs=None):
+            return {
+                'op': op,
+                'attrs': attrs or {},
+                'inputs': [{'var_id': v, 'shape': list(shape), 'dtype': dtype} for v in inputs],
+                'outputs': [{'var_id': v, 'shape': list(shape), 'dtype': dtype} for v in outputs],
+                'raw_op': op,
+            }
+
+        # 1. Disconnected arithmetic nodes: must NOT match fused arith chain
+        n0 = _pt_node('ADD', inputs=['in0', 'in1'], outputs=['v_mid1'])
+        n1 = _pt_node('MULTIPLY', inputs=['other0', 'other1'], outputs=['v_out1'])
+        matched = dedup.matcher.match([n0, n1])
+        fused_ids = {p.id for p in matched if 'fused-arith-chain' in p.id}
+        self.assertEqual(fused_ids, set())
+
+        # 2. Connected arithmetic nodes: must match fused arith chain
+        n2 = _pt_node('MULTIPLY', inputs=['v_mid1', 'other1'], outputs=['v_out2'])
+        matched = dedup.matcher.match([n0, n2])
+        fused_ids = {p.id for p in matched if 'fused-arith-chain' in p.id}
+        self.assertIn('pt-inductor-fp16-fused-arith-chain', fused_ids)
+
+        # 3. Disconnected arithmetic and rounding: must NOT match rounding
+        n_round_dis = _pt_node('FLOOR', inputs=['other_unrelated'], outputs=['v_floor'])
+        matched = dedup.matcher.match([n0, n_round_dis])
+        round_ids = {p.id for p in matched if p.id == 'pt-inductor-fp16-arith-rounding'}
+        self.assertEqual(round_ids, set())
+
+        # 4. Connected arithmetic and rounding: must match rounding
+        n_round_con = _pt_node('FLOOR', inputs=['v_mid1'], outputs=['v_floor'])
+        matched = dedup.matcher.match([n0, n_round_con])
+        round_ids = {p.id for p in matched if p.id == 'pt-inductor-fp16-arith-rounding'}
+        self.assertIn('pt-inductor-fp16-arith-rounding', round_ids)
+
+    def test_int_reduce_minmax_axis_len_tightening(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        def _pt_node(op, dtype, axis_len):
+            return {
+                'op': op,
+                'attrs': {'axis_len': axis_len},
+                'inputs': [{'var_id': 'v_in', 'shape': [axis_len], 'dtype': dtype}],
+                'outputs': [{'var_id': 'v_out', 'shape': [], 'dtype': dtype}],
+                'raw_op': op,
+            }
+
+        # int8/uint8 singleton reduction (axis_len=1) must NOT match
+        node_i8_len1 = _pt_node('REDUCE_MIN', 'int8', 1)
+        node_u8_len1 = _pt_node('REDUCE_MAX', 'uint8', 1)
+        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len1])})
+        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len1])})
+
+        # int8/uint8 non-singleton reduction (axis_len >= 2) must match
+        node_i8_len2 = _pt_node('REDUCE_MIN', 'int8', 2)
+        node_u8_len11 = _pt_node('REDUCE_MAX', 'uint8', 11)
+        self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len2])})
+        self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len11])})
+
+        # int16 reduction matches regardless of axis_len under dedicated pattern
+        node_i16_len1 = _pt_node('REDUCE_MIN', 'int16', 1)
+        self.assertIn('pt-inductor-int16-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
+
 if __name__ == '__main__':
     unittest.main()

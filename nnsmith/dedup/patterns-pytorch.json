@@ -5,58 +5,113 @@
       "id": "pt-inductor-fp16-fused-arith-chain",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: chained float16 arithmetic or concat operations upcast to fp32 in fused C++ kernel exceeding half precision tolerance",
+      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 0 by another fused arithmetic or concat operation",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "ADD",
-              "SUBTRACT",
-              "MULTIPLY",
-              "DIVIDE",
-              "CONCAT"
-            ]
-          },
-          "inputs": [
-            "v_in0"
-          ],
-          "outputs": [
-            "v_mid"
-          ],
+          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
+          "inputs": ["v_in0"],
+          "outputs": ["v_mid"],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
-          "op": {
-            "$in": [
-              "ADD",
-              "SUBTRACT",
-              "MULTIPLY",
-              "DIVIDE",
-              "CONCAT"
-            ]
-          },
-          "inputs": [
-            "v_mid"
-          ],
-          "outputs": [
-            "v_out"
-          ],
+          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
+          "inputs": ["v_mid"],
+          "outputs": ["v_out"],
           "attrs": {}
         }
       ],
       "values": [
+        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-fused-arith-chain-input1",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 1 by another fused arithmetic or concat operation",
+      "severity": "silent_correctness",
+      "nodes": [
         {
-          "match": "value",
-          "id": "v_mid",
-          "dtype": {
-            "$eq": "float16"
-          }
+          "match": "node",
+          "id": "n0",
+          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
+          "inputs": ["v_in0"],
+          "outputs": ["v_mid"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
+          "inputs": ["v_mid"],
+          "outputs": ["v_out"],
+          "attrs": {}
         }
+      ],
+      "values": [
+        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 1}
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-fused-arith-chain-input2",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 2 by another fused concat operation",
+      "severity": "silent_correctness",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
+      ],
+      "values": [
+        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 2}
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-fused-arith-chain-input3",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 3 by another fused concat operation",
+      "severity": "silent_correctness",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
+      ],
+      "values": [
+        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 3}
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-fused-arith-chain-input4",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 4 by another fused concat operation",
+      "severity": "silent_correctness",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
+      ],
+      "values": [
+        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 4}
       ]
     },
     {
@@ -117,6 +172,9 @@
           },
           "dtype": "float16"
         }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
       ]
     },
     {
@@ -362,7 +420,47 @@
       "id": "pt-inductor-int-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies",
+      "description": "Inductor CPU int8/uint8 REDUCE_MIN/REDUCE_MAX failures for non-singleton reduction axes",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "REDUCE_MIN",
+              "REDUCE_MAX"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {
+            "axis_len": {"$gte": 2}
+          }
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "dtype": {
+            "$in": [
+              "int8",
+              "uint8"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 REDUCE_MIN/REDUCE_MAX compile failures",
       "severity": "crash",
       "nodes": [
         {
@@ -387,13 +485,7 @@
         {
           "match": "value",
           "id": "v_in",
-          "dtype": {
-            "$in": [
-              "int8",
-              "uint8",
-              "int16"
-            ]
-          }
+          "dtype": {"$eq": "int16"}
         }
       ]
     },
