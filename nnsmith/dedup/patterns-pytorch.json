@@ -278,6 +278,44 @@
       ]
     },
     {
+      "id": "pt-inductor-cpu-byte-argreduce-tie",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU vectorized argmin/argmax mismatch on int8/uint8 inputs due to non-deterministic tie-breaking across SIMD vector lanes",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": {
+            "$in": [
+              "ARGMIN",
+              "ARGMAX"
+            ]
+          },
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "dtype": {
+            "$in": [
+              "uint8",
+              "int8"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "id": "pt-inductor-int-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",

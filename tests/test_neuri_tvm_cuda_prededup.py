@@ -32,6 +32,10 @@ PYTORCH_V6_DIR = Path(
     '/home/xyzboom/Data/maybeBug/2026-10-14/'
     'neuri_pt2_5k_targeted_paired_v6/dedup'
 )
+PYTORCH_V7_DIR = Path(
+    '/home/xyzboom/Data/maybeBug/2026-10-14/'
+    'neuri_pt2_5k_targeted_paired_v7/dedup'
+)
 
 class TestNeuriTvmCudaPrededup(unittest.TestCase):
     @classmethod
@@ -175,6 +179,33 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
 
         for rel, expected_pattern in samples.items():
             with (PYTORCH_V6_DIR / rel / 'gir.pkl').open('rb') as stream:
+                gir = pickle.load(stream)
+            self.assertIn(
+                expected_pattern,
+                {pattern.id for pattern in dedup.matches(gir)},
+            )
+
+    def test_byte_argreduce_pattern_matches_archived_reports(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        samples = {
+            'worker_0/run_0/bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-104':
+                'pt-inductor-cpu-byte-argreduce-tie',
+            'worker_0/run_0/bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-105':
+                'pt-inductor-cpu-byte-argreduce-tie',
+        }
+        if not all((PYTORCH_V7_DIR / rel / 'gir.pkl').exists() for rel in samples):
+            self.skipTest('Archived PyTorch v7 GIR files are not available')
+
+        for rel, expected_pattern in samples.items():
+            with (PYTORCH_V7_DIR / rel / 'gir.pkl').open('rb') as stream:
                 gir = pickle.load(stream)
             self.assertIn(
                 expected_pattern,
