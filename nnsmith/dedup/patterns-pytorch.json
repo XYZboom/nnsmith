@@ -181,19 +181,13 @@
       "id": "pt-inductor-fp16-interp",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor precision inconsistency: Interpolation ops on float16 lack CPU native support",
+      "description": "Inductor CPU float16 trilinear interpolation FMA accumulation drift can exceed atol=1e-3",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "BICUBIC_INTERP",
-              "TRILINEAR_INTERP",
-              "BILINEAR_INTERP"
-            ]
-          },
+          "op": "TRILINEAR_INTERP",
           "inputs": [
             "v_in"
           ],
@@ -207,9 +201,7 @@
         {
           "match": "value",
           "id": "v_in",
-          "ndim": {
-            "$gte": 3
-          },
+          "ndim": 5,
           "dtype": "float16"
         }
       ]
@@ -1075,20 +1067,13 @@
       "id": "pt-inductor-fp16-trans-to-trans",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU float16 transcendental operation feeding transcendental operation",
+      "description": "Inductor CPU float16 TAN feeding TAN/SIN/COS exceeds verification tolerance",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "TAN",
-              "SIN",
-              "COS",
-              "ATAN"
-            ]
-          },
+          "op": "TAN",
           "inputs": [
             "v_in"
           ],
@@ -1104,8 +1089,7 @@
             "$in": [
               "TAN",
               "SIN",
-              "COS",
-              "ATAN"
+              "COS"
             ]
           },
           "inputs": [
@@ -1140,6 +1124,46 @@
           "toNode": "n1",
           "toInput": 0
         }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-atan-to-tan",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU float16 ATAN feeding TAN exceeds verification tolerance",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ATAN",
+          "inputs": ["v_in"],
+          "outputs": ["v_mid"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "TAN",
+          "inputs": ["v_mid"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {"$eq": "float16"}
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {"$eq": "float16"}
+        }
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
       ]
     },
     {

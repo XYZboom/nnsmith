@@ -549,5 +549,80 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertNotIn(target, {p.id for p in dedup.matcher.match([missing_identity])})
         self.assertIn(target, {p.id for p in dedup.matcher.match([distinct])})
 
+    def test_fp16_interp_matches_only_rank5_trilinear(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+
+        def interp_node(op, shape):
+            return {
+                'op': op,
+                'attrs': {},
+                'inputs': [{'var_id': 'v0', 'shape': list(shape), 'dtype': 'float16'}],
+                'outputs': [{'var_id': 'v1', 'shape': list(shape), 'dtype': 'float16'}],
+                'raw_op': op,
+            }
+
+        target = 'pt-inductor-fp16-interp'
+        rank5_trilinear = interp_node('TRILINEAR_INTERP', (1, 3, 4, 5, 6))
+        rank4_trilinear = interp_node('TRILINEAR_INTERP', (1, 3, 5, 6))
+        rank4_bilinear = interp_node('BILINEAR_INTERP', (1, 3, 5, 6))
+        rank4_bicubic = interp_node('BICUBIC_INTERP', (1, 3, 5, 6))
+
+        self.assertIn(target, {p.id for p in dedup.matcher.match([rank5_trilinear])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_trilinear])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_bilinear])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_bicubic])})
+
+    def test_fp16_trans_to_trans_matches_only_proven_pairs(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+
+        def node(op, inputs, outputs):
+            def ref(var_id):
+                return {'var_id': var_id, 'shape': [2, 3], 'dtype': 'float16'}
+            return {
+                'op': op,
+                'attrs': {},
+                'inputs': [ref(v) for v in inputs],
+                'outputs': [ref(v) for v in outputs],
+                'raw_op': op,
+            }
+
+        valid_pairs = {
+            ('TAN', 'TAN'),
+            ('TAN', 'SIN'),
+            ('TAN', 'COS'),
+            ('ATAN', 'TAN'),
+        }
+        all_ops = ('TAN', 'SIN', 'COS', 'ATAN')
+        for producer_op in all_ops:
+            for consumer_op in all_ops:
+                producer = node(producer_op, ['v_in'], ['v_mid'])
+                consumer = node(consumer_op, ['v_mid'], ['v_out'])
+                matched = {p.id for p in dedup.matcher.match([producer, consumer])}
+                matched_target = bool({
+                    'pt-inductor-fp16-trans-to-trans',
+                    'pt-inductor-fp16-atan-to-tan',
+                } & matched)
+                self.assertEqual(
+                    matched_target,
+                    (producer_op, consumer_op) in valid_pairs,
+                    (producer_op, consumer_op, matched),
+                )
+
 if __name__ == '__main__':
     unittest.main()
