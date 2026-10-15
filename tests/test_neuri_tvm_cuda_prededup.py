@@ -624,5 +624,32 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                     (producer_op, consumer_op, matched),
                 )
 
+    def test_byte_matmul_requires_rhs_last_dimension_one(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+
+        def ref(var_id, shape):
+            return {'var_id': var_id, 'shape': list(shape), 'dtype': 'int8'}
+
+        def matmul(rhs_shape):
+            return {
+                'op': 'MATMUL',
+                'attrs': {},
+                'inputs': [ref('lhs', (2, 4, 5)), ref('rhs', rhs_shape)],
+                'outputs': [ref('out', (2, 4, rhs_shape[-1]))],
+                'raw_op': 'MATMUL',
+            }
+
+        target = 'pt-inductor-cpu-byte-matmul-broadcast-upcast'
+        self.assertIn(target, {p.id for p in dedup.matcher.match([matmul((2, 5, 1))])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([matmul((2, 5, 6))])})
+
 if __name__ == '__main__':
     unittest.main()

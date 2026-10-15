@@ -1330,7 +1330,10 @@
           "match": "value",
           "id": "v_rhs",
           "ndim": {"$gte": 3},
-          "dtype": {"$in": ["int8", "uint8"]}
+          "dtype": {"$in": ["int8", "uint8"]},
+          "expressionConstraints": [
+            {"dimIndices": [-1], "op": "add", "allowedValues": [1]}
+          ]
         }
       ]
     }
