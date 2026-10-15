@@ -215,6 +215,28 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 {pattern.id for pattern in dedup.matches(gir)},
             )
 
+    def test_byte_matmul_pattern_matches_archived_reports(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+        sample = Path(
+            '/home/xyzboom/Data/maybeBug/2026-10-15/'
+            'neuri_pt2_5k_targeted_paired_v9/dedup/worker_0/run_0/'
+            'bug-Symptom.INCONSISTENCY-Stage.VERIFICATION-139/gir.pkl'
+        )
+        if not sample.exists():
+            self.skipTest('Archived PyTorch v9 sample not available')
+        with sample.open('rb') as stream:
+            gir = pickle.load(stream)
+        matched_ids = {pattern.id for pattern in dedup.matches(gir)}
+        self.assertIn('pt-inductor-cpu-byte-matmul-broadcast-upcast', matched_ids)
+
     def test_precise_crash_patterns_match_archived_reports(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
