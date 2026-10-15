@@ -361,6 +361,7 @@ class DedupMatcher:
         otensors: List[Any],
         output_vars: Optional[List[str]] = None,
         input_tensors: Optional[List[Any]] = None,
+        shape_model: Any = None,
     ) -> Optional[PatternDef]:
         """aiFuzzer-style online check: evaluate candidate node before committing to graph."""
         if not self.patterns:
@@ -381,8 +382,13 @@ class DedupMatcher:
                 tensor = input_tensors[idx]
             if tensor is not None:
                 from nnsmith.dedup.normalizer import _dtype_to_str, _shape_to_list
-                cand_node['inputs'][idx]['shape'] = _shape_to_list(tensor.shape)
+                cand_node['inputs'][idx]['shape'] = _shape_to_list(
+                    tensor.shape, model=shape_model
+                )
                 cand_node['inputs'][idx]['dtype'] = _dtype_to_str(tensor.dtype)
+
+        from nnsmith.dedup.normalizer import enrich_reduction_attrs
+        enrich_reduction_attrs(cand_node)
 
         if output_vars:
             output_set = set(output_vars)

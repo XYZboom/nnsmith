@@ -178,13 +178,18 @@ def get_op_name(op) -> str:
     return raw
 
 
-def _shape_to_list(shape) -> List[int]:
+def _shape_to_list(shape, model=None) -> List[int]:
     """Convert a shape (tuple/list/tvm shape) to a list of concrete ints.
     Returns [] if shape is symbolic (not integer)."""
     if shape is None:
         return []
     try:
-        return [int(d) for d in shape]
+        if model is not None:
+            shape = [
+                model.eval(d, model_completion=True) if hasattr(d, 'as_ast') else d
+                for d in shape
+            ]
+        return [int(d.as_long()) if hasattr(d, 'as_long') else int(d) for d in shape]
     except (TypeError, ValueError):
         # Symbolic dims (z3) — return placeholder
         return [d for d in shape]
@@ -199,7 +204,25 @@ def _dtype_to_str(dtype) -> str:
     return s
 
 
-def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
+def enrich_reduction_attrs(node: dict) -> None:
+    """Attach concrete reduction-axis metadata when it is provable."""
+    if node.get('op') not in ('ARGMIN', 'ARGMAX', 'REDUCE_MIN', 'REDUCE_MAX'):
+        return
+    inputs = node.get('inputs', [])
+    shape = inputs[0].get('shape', []) if inputs else []
+    axis = node.get('attrs', {}).get('axis')
+    try:
+        axis = int(axis)
+        rank = len(shape)
+        if axis < 0:
+            axis += rank
+        axis_len = int(shape[axis])
+    except (IndexError, TypeError, ValueError):
+        return
+    node['attrs']['axis_len'] = axis_len
+
+
+def normalize_graph(ir, backend: str = 'torch', shape_model: Any = None) -> List[dict]:
     """
     Normalize nnsmith GraphIR to a list of dicts:
     { 'op': str, 'attrs': dict, 'inputs': [{'shape':[...], 'dtype':str}], 
@@ -240,7 +263,7 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
                 t = vars_map[arg_name]
                 input_info.append({
                     'var_id': str(arg_name),
-                    'shape': _shape_to_list(t.shape),
+                    'shape': _shape_to_list(t.shape, model=shape_model),
                     'dtype': _dtype_to_str(t.dtype),
                 })
             else:
@@ -256,7 +279,7 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
                 t = vars_map[vname]
                 output_info.append({
                     'var_id': str(vname),
-                    'shape': _shape_to_list(t.shape),
+                    'shape': _shape_to_list(t.shape, model=shape_model),
                     'dtype': _dtype_to_str(t.dtype),
                 })
             else:
@@ -264,13 +287,15 @@ def normalize_graph(ir, backend: str = 'torch') -> List[dict]:
                     'var_id': str(vname), 'shape': [], 'dtype': 'unknown'
                 })
 
-        nodes.append({
+        node = {
             'op': pattern_op,
             'attrs': attrs,
             'inputs': input_info,
             'outputs': output_info,
             'raw_op': op_name,
-        })
+        }
+        enrich_reduction_attrs(node)
+        nodes.append(node)
 
     return nodes
 

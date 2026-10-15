@@ -3,6 +3,7 @@ import json
 import pickle
 from pathlib import Path
 import unittest
+import z3
 
 from nnsmith.cli.fuzz import FuzzingLoop
 from nnsmith.dedup import DedupMatcher
@@ -10,8 +11,10 @@ from nnsmith.dedup.constraints import (
     DtypeExact,
     ExpressionConstraint,
     ValueRangeOutside,
+    parse_attr_matcher,
 )
 from nnsmith.dedup.matcher import PatternMatcher
+from nnsmith.dedup.normalizer import _shape_to_list
 from nnsmith.dedup.parser import (
     FlowConstraint,
     PatternDef,
@@ -375,6 +378,22 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
 
         self.assertTrue(constraint.matches([2, 1]))
         self.assertFalse(constraint.matches([2, object()]))  # type: ignore[list-item]
+
+    def test_attr_gte_constraint_fails_closed(self):
+        constraint = parse_attr_matcher({'$gte': 16})
+
+        self.assertTrue(constraint.matches(16))
+        self.assertTrue(constraint.matches(61))
+        self.assertFalse(constraint.matches(15))
+        self.assertFalse(constraint.matches(object()))
+
+    def test_shape_materialization_handles_mixed_concrete_and_symbolic_dims(self):
+        dim = z3.Int('dedup_test_dim')
+        solver = z3.Solver()
+        solver.add(dim == 17)
+        self.assertEqual(solver.check(), z3.sat)
+
+        self.assertEqual(_shape_to_list([1, dim], solver.model()), [1, 17])
 
     def test_fuzz_log_records_pattern_ids_without_seed_retry(self):
         source = inspect.getsource(FuzzingLoop.make_testcase)

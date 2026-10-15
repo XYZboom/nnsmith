@@ -281,37 +281,80 @@
       "id": "pt-inductor-cpu-byte-argreduce-tie",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU vectorized argmin/argmax mismatch on int8/uint8 inputs due to non-deterministic tie-breaking across SIMD vector lanes",
+      "description": "Inductor CPU vectorized argmin mismatch on rank-3-or-lower uint8 inputs with a reduction axis of at least 16 elements",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "ARGMIN",
-              "ARGMAX"
-            ]
-          },
-          "inputs": [
-            "v_in"
-          ],
-          "outputs": [
-            "v_out"
-          ],
-          "attrs": {}
+          "op": "ARGMIN",
+          "inputs": ["v_in"],
+          "outputs": ["v_out"],
+          "attrs": {
+            "axis_len": {"$gte": 16}
+          }
         }
       ],
       "values": [
         {
           "match": "value",
           "id": "v_in",
-          "dtype": {
-            "$in": [
-              "uint8",
-              "int8"
-            ]
+          "ndim": {"$lte": 3},
+          "dtype": {"$eq": "uint8"}
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-cpu-int8-argmin-tie",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU vectorized argmin mismatch on rank-4-or-lower int8 inputs with a reduction axis of at least 16 elements",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ARGMIN",
+          "inputs": ["v_in"],
+          "outputs": ["v_out"],
+          "attrs": {
+            "axis_len": {"$gte": 16}
           }
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "ndim": {"$lte": 4},
+          "dtype": {"$eq": "int8"}
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-cpu-int8-argmax-tie",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU vectorized argmax mismatch on rank-4-or-lower int8 inputs with a reduction axis of at least 16 elements",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ARGMAX",
+          "inputs": ["v_in"],
+          "outputs": ["v_out"],
+          "attrs": {
+            "axis_len": {"$gte": 16}
+          }
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_in",
+          "ndim": {"$lte": 4},
+          "dtype": {"$eq": "int8"}
         }
       ]
     },

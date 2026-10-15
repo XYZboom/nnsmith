@@ -270,6 +270,14 @@ class AttrNotIntList(AttrMatcher):
         return any(a != v for a, v in zip(actual, self.values))
 
 
+class AttrGreaterEqual(AttrMatcher):
+    def __init__(self, value: int):
+        self.value = value
+
+    def matches(self, actual):
+        return isinstance(actual, int) and actual >= self.value
+
+
 def parse_attr_matcher(obj: Any) -> AttrMatcher:
     if isinstance(obj, str):
         return AttrExactString(obj)
@@ -280,6 +288,8 @@ def parse_attr_matcher(obj: Any) -> AttrMatcher:
             return AttrExactIntList([int(v) for v in obj])
         return AttrAny()
     if isinstance(obj, dict):
+        if '$gte' in obj:
+            return AttrGreaterEqual(int(obj['$gte']))
         if '$in' in obj:
             return AttrInList([str(v) for v in obj['$in']])
         if '$eq' in obj:

@@ -521,7 +521,11 @@ class SymbolicGen(BaseGen):
         # aiFuzzer-style pre-dedup online check (post-generation, pre-commit)
         if getattr(self, 'dedup_matcher', None) is not None:
             matched = self.dedup_matcher.on_node_generated(
-                self.ir, node, input_vars, otensors
+                self.ir,
+                node,
+                input_vars,
+                otensors,
+                shape_model=self.last_solution,
             )
             if matched is not None:
                 return False
@@ -599,6 +603,7 @@ class SymbolicGen(BaseGen):
                 inferred_otensors,
                 output_vars=phvars,
                 input_tensors=itensors,
+                shape_model=self.last_solution,
             )
             if matched is not None:
                 return False
