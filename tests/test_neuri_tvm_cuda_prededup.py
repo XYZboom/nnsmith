@@ -432,7 +432,7 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertLess(check_at, candidate_commit_at)
         self.assertIn('output_vars=phvars', source)
 
-    def test_fp16_fused_arith_and_rounding_require_direct_flow(self):
+    def test_validated_fp16_fused_arith_and_rounding_catalog(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -451,12 +451,12 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 'raw_op': op,
             }
 
-        # 1. Disconnected arithmetic nodes: must NOT match fused arith chain
+        # The validated historical baseline intentionally keeps this broad rule.
         n0 = _pt_node('ADD', inputs=['in0', 'in1'], outputs=['v_mid1'])
         n1 = _pt_node('MULTIPLY', inputs=['other0', 'other1'], outputs=['v_out1'])
         matched = dedup.matcher.match([n0, n1])
         fused_ids = {p.id for p in matched if 'fused-arith-chain' in p.id}
-        self.assertEqual(fused_ids, set())
+        self.assertIn('pt-inductor-fp16-fused-arith-chain', fused_ids)
 
         # 2. Connected arithmetic nodes: must match fused arith chain
         n2 = _pt_node('MULTIPLY', inputs=['v_mid1', 'other1'], outputs=['v_out2'])
@@ -464,11 +464,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         fused_ids = {p.id for p in matched if 'fused-arith-chain' in p.id}
         self.assertIn('pt-inductor-fp16-fused-arith-chain', fused_ids)
 
-        # 3. Disconnected arithmetic and rounding: must NOT match rounding
+        # 3. The validated historical rounding rule is likewise broad.
         n_round_dis = _pt_node('FLOOR', inputs=['other_unrelated'], outputs=['v_floor'])
         matched = dedup.matcher.match([n0, n_round_dis])
         round_ids = {p.id for p in matched if p.id == 'pt-inductor-fp16-arith-rounding'}
-        self.assertEqual(round_ids, set())
+        self.assertIn('pt-inductor-fp16-arith-rounding', round_ids)
 
         # 4. Connected arithmetic and rounding: must match rounding
         n_round_con = _pt_node('FLOOR', inputs=['v_mid1'], outputs=['v_floor'])
@@ -476,7 +476,7 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         round_ids = {p.id for p in matched if p.id == 'pt-inductor-fp16-arith-rounding'}
         self.assertIn('pt-inductor-fp16-arith-rounding', round_ids)
 
-    def test_int_reduce_minmax_axis_len_tightening(self):
+    def test_validated_int_reduce_minmax_catalog(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -495,11 +495,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 'raw_op': op,
             }
 
-        # int8/uint8 singleton reduction (axis_len=1) must NOT match
+        # The validated historical baseline covers all narrow-integer extents.
         node_i8_len1 = _pt_node('REDUCE_MIN', 'int8', 1)
         node_u8_len1 = _pt_node('REDUCE_MAX', 'uint8', 1)
-        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len1])})
-        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len1])})
+        self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len1])})
+        self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len1])})
 
         # int8/uint8 non-singleton reduction (axis_len >= 2) must match
         node_i8_len2 = _pt_node('REDUCE_MIN', 'int8', 2)
@@ -507,20 +507,29 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len2])})
         self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len11])})
 
-        # int16 reduction matches regardless of axis_len under dedicated pattern
+        # int16 is covered by the shared rule; the later dedicated rule is absent.
         node_i16_len1 = _pt_node('REDUCE_MIN', 'int16', 1)
-        self.assertIn('pt-inductor-int16-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
+        self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
+        self.assertNotIn('pt-inductor-int16-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
 
     def test_int_minmax_excludes_identical_inputs(self):
-        pattern_file = (
-            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
-        )
-        dedup = DedupMatcher(
-            pattern_dir=str(pattern_file),
+        pattern = PatternDef(
+            id='var-ne-capability',
             compiler='pytorch',
             target='cpu',
-            backend='torch',
+            description=None,
+            severity=None,
+            nodes=[PatternNodeDef(
+                'n0',
+                'MINIMUM',
+                ['v_lhs', 'v_rhs'],
+                ['v_out'],
+                {},
+                input_constraints=[{'lhs': 0, 'op': 'var_ne', 'rhs': 1}],
+            )],
+            values={},
         )
+        matcher = PatternMatcher([pattern], compiler='pytorch', target='cpu')
 
         def ref(var_id):
             return {'var_id': var_id, 'shape': [2, 3], 'dtype': 'int16'}
@@ -544,12 +553,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
             ],
         }
 
-        target = 'pt-inductor-int-minmax-distinct-inputs'
-        self.assertNotIn(target, {p.id for p in dedup.matcher.match([identical])})
-        self.assertNotIn(target, {p.id for p in dedup.matcher.match([missing_identity])})
-        self.assertIn(target, {p.id for p in dedup.matcher.match([distinct])})
+        self.assertEqual(matcher.match([identical]), [])
+        self.assertEqual(matcher.match([missing_identity]), [])
+        self.assertEqual(matcher.match([distinct]), [pattern])
 
-    def test_fp16_interp_matches_only_rank5_trilinear(self):
+    def test_validated_fp16_interp_catalog(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -574,13 +582,15 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         rank4_trilinear = interp_node('TRILINEAR_INTERP', (1, 3, 5, 6))
         rank4_bilinear = interp_node('BILINEAR_INTERP', (1, 3, 5, 6))
         rank4_bicubic = interp_node('BICUBIC_INTERP', (1, 3, 5, 6))
+        rank2_bilinear = interp_node('BILINEAR_INTERP', (5, 6))
 
         self.assertIn(target, {p.id for p in dedup.matcher.match([rank5_trilinear])})
-        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_trilinear])})
-        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_bilinear])})
-        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank4_bicubic])})
+        self.assertIn(target, {p.id for p in dedup.matcher.match([rank4_trilinear])})
+        self.assertIn(target, {p.id for p in dedup.matcher.match([rank4_bilinear])})
+        self.assertIn(target, {p.id for p in dedup.matcher.match([rank4_bicubic])})
+        self.assertNotIn(target, {p.id for p in dedup.matcher.match([rank2_bilinear])})
 
-    def test_fp16_trans_to_trans_matches_only_proven_pairs(self):
+    def test_validated_fp16_trans_to_trans_catalog(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -602,27 +612,63 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                 'raw_op': op,
             }
 
-        valid_pairs = {
-            ('TAN', 'TAN'),
-            ('TAN', 'SIN'),
-            ('TAN', 'COS'),
-            ('ATAN', 'TAN'),
-        }
         all_ops = ('TAN', 'SIN', 'COS', 'ATAN')
         for producer_op in all_ops:
             for consumer_op in all_ops:
                 producer = node(producer_op, ['v_in'], ['v_mid'])
                 consumer = node(consumer_op, ['v_mid'], ['v_out'])
                 matched = {p.id for p in dedup.matcher.match([producer, consumer])}
-                matched_target = bool({
-                    'pt-inductor-fp16-trans-to-trans',
-                    'pt-inductor-fp16-atan-to-tan',
-                } & matched)
+                matched_target = 'pt-inductor-fp16-trans-to-trans' in matched
                 self.assertEqual(
                     matched_target,
-                    (producer_op, consumer_op) in valid_pairs,
+                    True,
                     (producer_op, consumer_op, matched),
                 )
+
+    def test_fp16_matmul_to_trig_and_add_to_tan(self):
+        pattern_file = (
+            Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        )
+        dedup = DedupMatcher(
+            pattern_dir=str(pattern_file),
+            compiler='pytorch',
+            target='cpu',
+            backend='torch',
+        )
+
+        def node(op, inputs, outputs, dtype='float16'):
+            def ref(var_id):
+                return {'var_id': var_id, 'shape': [2, 3], 'dtype': dtype}
+            return {
+                'op': op,
+                'attrs': {},
+                'inputs': [ref(v) for v in inputs],
+                'outputs': [ref(v) for v in outputs],
+                'raw_op': op,
+            }
+
+        matmul = node('MATMUL', ['lhs', 'rhs'], ['mid'])
+        add = node('ADD', ['lhs', 'rhs'], ['mid'])
+        for trig in ('TAN', 'SIN', 'COS'):
+            matched = {
+                p.id for p in dedup.matcher.match(
+                    [matmul, node(trig, ['mid'], ['out'])]
+                )
+            }
+            self.assertIn('pt-inductor-fp16-matmul-to-trig', matched)
+
+        matched = {
+            p.id for p in dedup.matcher.match([add, node('TAN', ['mid'], ['out'])])
+        }
+        self.assertIn('pt-inductor-fp16-add-to-tan', matched)
+
+        for producer, consumer in (
+            (add, node('SIN', ['mid'], ['out'])),
+            (node('MULTIPLY', ['lhs', 'rhs'], ['mid']), node('TAN', ['mid'], ['out'])),
+            (add, node('TAN', ['other'], ['out'])),
+        ):
+            matched = {p.id for p in dedup.matcher.match([producer, consumer])}
+            self.assertNotIn('pt-inductor-fp16-add-to-tan', matched)
 
     def test_byte_matmul_requires_rhs_last_dimension_one(self):
         pattern_file = (

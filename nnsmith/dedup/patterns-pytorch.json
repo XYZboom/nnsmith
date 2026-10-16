@@ -5,113 +5,58 @@
       "id": "pt-inductor-fp16-fused-arith-chain",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 0 by another fused arithmetic or concat operation",
+      "description": "Inductor CPU precision inconsistency: chained float16 arithmetic or concat operations upcast to fp32 in fused C++ kernel exceeding half precision tolerance",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
-          "inputs": ["v_in0"],
-          "outputs": ["v_mid"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT",
+              "MULTIPLY",
+              "DIVIDE",
+              "CONCAT"
+            ]
+          },
+          "inputs": [
+            "v_in0"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
-          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
-          "inputs": ["v_mid"],
-          "outputs": ["v_out"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT",
+              "MULTIPLY",
+              "DIVIDE",
+              "CONCAT"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
       "values": [
-        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-fused-arith-chain-input1",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 1 by another fused arithmetic or concat operation",
-      "severity": "silent_correctness",
-      "nodes": [
         {
-          "match": "node",
-          "id": "n0",
-          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
-          "inputs": ["v_in0"],
-          "outputs": ["v_mid"],
-          "attrs": {}
-        },
-        {
-          "match": "node",
-          "id": "n1",
-          "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]},
-          "inputs": ["v_mid"],
-          "outputs": ["v_out"],
-          "attrs": {}
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
         }
-      ],
-      "values": [
-        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 1}
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-fused-arith-chain-input2",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 2 by another fused concat operation",
-      "severity": "silent_correctness",
-      "nodes": [
-        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
-        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
-      ],
-      "values": [
-        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 2}
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-fused-arith-chain-input3",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 3 by another fused concat operation",
-      "severity": "silent_correctness",
-      "nodes": [
-        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
-        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
-      ],
-      "values": [
-        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 3}
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-fused-arith-chain-input4",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU precision inconsistency: a float16 arithmetic or concat result directly consumed at input 4 by another fused concat operation",
-      "severity": "silent_correctness",
-      "nodes": [
-        {"match": "node", "id": "n0", "op": {"$in": ["ADD", "SUBTRACT", "MULTIPLY", "DIVIDE", "CONCAT"]}, "inputs": ["v_in0"], "outputs": ["v_mid"], "attrs": {}},
-        {"match": "node", "id": "n1", "op": "CONCAT", "inputs": ["v_mid"], "outputs": ["v_out"], "attrs": {}}
-      ],
-      "values": [
-        {"match": "value", "id": "v_mid", "dtype": {"$eq": "float16"}}
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 4}
       ]
     },
     {
@@ -172,22 +117,25 @@
           },
           "dtype": "float16"
         }
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
       ]
     },
     {
       "id": "pt-inductor-fp16-interp",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU float16 trilinear interpolation FMA accumulation drift can exceed atol=1e-3",
+      "description": "Inductor precision inconsistency: Interpolation ops on float16 lack CPU native support",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": "TRILINEAR_INTERP",
+          "op": {
+            "$in": [
+              "BICUBIC_INTERP",
+              "TRILINEAR_INTERP",
+              "BILINEAR_INTERP"
+            ]
+          },
           "inputs": [
             "v_in"
           ],
@@ -201,7 +149,9 @@
         {
           "match": "value",
           "id": "v_in",
-          "ndim": 5,
+          "ndim": {
+            "$gte": 3
+          },
           "dtype": "float16"
         }
       ]
@@ -257,13 +207,19 @@
       "id": "pt-inductor-int-clip-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor C++ codegen bug: integer CLIP on int8/int16 causes type deduction failure in min/max_propagate_nan",
+      "description": "Inductor C++ codegen bug: integer CLIP/MINIMUM/MAXIMUM on int8/int16 causes type deduction failure in min/max_propagate_nan",
       "severity": "crash",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": "CLIP",
+          "op": {
+            "$in": [
+              "CLIP",
+              "MINIMUM",
+              "MAXIMUM"
+            ]
+          },
           "inputs": [
             "v_in"
           ],
@@ -283,33 +239,6 @@
               "int16"
             ]
           }
-        }
-      ]
-    },
-    {
-      "id": "pt-inductor-int-minmax-distinct-inputs",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor C++ codegen bug: integer MINIMUM/MAXIMUM with distinct int8/int16 inputs causes type deduction failure in min/max_propagate_nan",
-      "severity": "crash",
-      "nodes": [
-        {
-          "match": "node",
-          "id": "n0",
-          "op": {"$in": ["MINIMUM", "MAXIMUM"]},
-          "inputs": ["v_lhs", "v_rhs"],
-          "outputs": ["v_out"],
-          "attrs": {},
-          "inputConstraints": [
-            {"lhs": 0, "op": "var_ne", "rhs": 1}
-          ]
-        }
-      ],
-      "values": [
-        {
-          "match": "value",
-          "id": "v_lhs",
-          "dtype": {"$in": ["int8", "int16"]}
         }
       ]
     },
@@ -352,97 +281,16 @@
       "id": "pt-inductor-cpu-byte-argreduce-tie",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU vectorized argmin mismatch on rank-3-or-lower uint8 inputs with a reduction axis of at least 16 elements",
+      "description": "Inductor CPU vectorized argmin/argmax mismatch on int8/uint8 inputs due to non-deterministic tie-breaking across SIMD vector lanes",
       "severity": "silent_correctness",
-      "nodes": [
-        {
-          "match": "node",
-          "id": "n0",
-          "op": "ARGMIN",
-          "inputs": ["v_in"],
-          "outputs": ["v_out"],
-          "attrs": {
-            "axis_len": {"$gte": 16}
-          }
-        }
-      ],
-      "values": [
-        {
-          "match": "value",
-          "id": "v_in",
-          "ndim": {"$lte": 3},
-          "dtype": {"$eq": "uint8"}
-        }
-      ]
-    },
-    {
-      "id": "pt-inductor-cpu-int8-argmin-tie",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU vectorized argmin mismatch on rank-4-or-lower int8 inputs with a reduction axis of at least 16 elements",
-      "severity": "silent_correctness",
-      "nodes": [
-        {
-          "match": "node",
-          "id": "n0",
-          "op": "ARGMIN",
-          "inputs": ["v_in"],
-          "outputs": ["v_out"],
-          "attrs": {
-            "axis_len": {"$gte": 16}
-          }
-        }
-      ],
-      "values": [
-        {
-          "match": "value",
-          "id": "v_in",
-          "ndim": {"$lte": 4},
-          "dtype": {"$eq": "int8"}
-        }
-      ]
-    },
-    {
-      "id": "pt-inductor-cpu-int8-argmax-tie",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU vectorized argmax mismatch on rank-4-or-lower int8 inputs with a reduction axis of at least 16 elements",
-      "severity": "silent_correctness",
-      "nodes": [
-        {
-          "match": "node",
-          "id": "n0",
-          "op": "ARGMAX",
-          "inputs": ["v_in"],
-          "outputs": ["v_out"],
-          "attrs": {
-            "axis_len": {"$gte": 16}
-          }
-        }
-      ],
-      "values": [
-        {
-          "match": "value",
-          "id": "v_in",
-          "ndim": {"$lte": 4},
-          "dtype": {"$eq": "int8"}
-        }
-      ]
-    },
-    {
-      "id": "pt-inductor-int-reduce-minmax",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU int8/uint8 REDUCE_MIN/REDUCE_MAX failures for non-singleton reduction axes",
-      "severity": "crash",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
           "op": {
             "$in": [
-              "REDUCE_MIN",
-              "REDUCE_MAX"
+              "ARGMIN",
+              "ARGMAX"
             ]
           },
           "inputs": [
@@ -451,9 +299,7 @@
           "outputs": [
             "v_out"
           ],
-          "attrs": {
-            "axis_len": {"$gte": 2}
-          }
+          "attrs": {}
         }
       ],
       "values": [
@@ -462,18 +308,18 @@
           "id": "v_in",
           "dtype": {
             "$in": [
-              "int8",
-              "uint8"
+              "uint8",
+              "int8"
             ]
           }
         }
       ]
     },
     {
-      "id": "pt-inductor-int16-reduce-minmax",
+      "id": "pt-inductor-int-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU int16 REDUCE_MIN/REDUCE_MAX compile failures",
+      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies",
       "severity": "crash",
       "nodes": [
         {
@@ -498,7 +344,13 @@
         {
           "match": "value",
           "id": "v_in",
-          "dtype": {"$eq": "int16"}
+          "dtype": {
+            "$in": [
+              "int8",
+              "uint8",
+              "int16"
+            ]
+          }
         }
       ]
     },
@@ -513,24 +365,36 @@
           "match": "node",
           "id": "n0",
           "op": "SOFTMAX",
-          "inputs": ["v_in"],
-          "outputs": ["v_softmax"],
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_softmax"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "SQUEEZE",
-          "inputs": ["v_softmax"],
-          "outputs": ["v_src"],
+          "inputs": [
+            "v_softmax"
+          ],
+          "outputs": [
+            "v_src"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "REDUCE_MAX",
-          "inputs": ["v_src"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -538,17 +402,31 @@
         {
           "match": "value",
           "id": "v_softmax",
-          "dtype": {"$eq": "float16"}
+          "dtype": {
+            "$eq": "float16"
+          }
         },
         {
           "match": "value",
           "id": "v_src",
-          "dtype": {"$eq": "float16"}
+          "dtype": {
+            "$eq": "float16"
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -562,24 +440,36 @@
           "match": "node",
           "id": "n0",
           "op": "COS",
-          "inputs": ["v_in"],
-          "outputs": ["v_src"],
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_src"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "REDUCE_MIN",
-          "inputs": ["v_src"],
-          "outputs": ["v_out0"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out0"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "REDUCE_MIN",
-          "inputs": ["v_src"],
-          "outputs": ["v_out1"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out1"
+          ],
           "attrs": {}
         }
       ],
@@ -587,12 +477,24 @@
         {
           "match": "value",
           "id": "v_src",
-          "dtype": {"$eq": "float16"}
+          "dtype": {
+            "$eq": "float16"
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -606,24 +508,36 @@
           "match": "node",
           "id": "n0",
           "op": "ATAN",
-          "inputs": ["v_in"],
-          "outputs": ["v_src"],
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_src"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "REDUCE_SUM",
-          "inputs": ["v_src"],
-          "outputs": ["v_out0"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out0"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "REDUCE_SUM",
-          "inputs": ["v_src"],
-          "outputs": ["v_out1"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_out1"
+          ],
           "attrs": {}
         }
       ],
@@ -631,12 +545,24 @@
         {
           "match": "value",
           "id": "v_src",
-          "dtype": {"$eq": "float16"}
+          "dtype": {
+            "$eq": "float16"
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -650,16 +576,26 @@
           "match": "node",
           "id": "n0",
           "op": "MATMUL",
-          "inputs": ["v_lhs", "v_rhs"],
-          "outputs": ["v_mid"],
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "MATMUL",
-          "inputs": ["v_mid", "v_tail"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_mid",
+            "v_tail"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -667,36 +603,61 @@
         {
           "match": "value",
           "id": "v_lhs",
-          "ndim": {"$eq": 2},
-          "dtype": {"$eq": "int32"}
+          "ndim": {
+            "$eq": 2
+          },
+          "dtype": {
+            "$eq": "int32"
+          }
         },
         {
           "match": "value",
           "id": "v_rhs",
-          "ndim": {"$eq": 3},
-          "dtype": {"$eq": "int32"}
+          "ndim": {
+            "$eq": 3
+          },
+          "dtype": {
+            "$eq": "int32"
+          }
         },
         {
           "match": "value",
           "id": "v_mid",
-          "ndim": {"$eq": 3},
-          "dtype": {"$eq": "int32"}
+          "ndim": {
+            "$eq": 3
+          },
+          "dtype": {
+            "$eq": "int32"
+          }
         },
         {
           "match": "value",
           "id": "v_tail",
-          "ndim": {"$eq": 2},
-          "dtype": {"$eq": "int32"}
+          "ndim": {
+            "$eq": 2
+          },
+          "dtype": {
+            "$eq": "int32"
+          }
         },
         {
           "match": "value",
           "id": "v_out",
-          "ndim": {"$eq": 3},
-          "dtype": {"$eq": "int32"}
+          "ndim": {
+            "$eq": 3
+          },
+          "dtype": {
+            "$eq": "int32"
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -710,24 +671,37 @@
           "match": "node",
           "id": "n0",
           "op": "MULTIPLY",
-          "inputs": ["v_lhs", "v_rhs"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "CAST",
-          "inputs": ["v_complex"],
-          "outputs": ["v_real"],
+          "inputs": [
+            "v_complex"
+          ],
+          "outputs": [
+            "v_real"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "SOFTMAX",
-          "inputs": ["v_real"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_real"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -735,17 +709,37 @@
         {
           "match": "value",
           "id": "v_complex",
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         },
         {
           "match": "value",
           "id": "v_real",
-          "dtype": {"$in": ["float32", "float64"]}
+          "dtype": {
+            "$in": [
+              "float32",
+              "float64"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -759,32 +753,49 @@
           "match": "node",
           "id": "n0",
           "op": "MULTIPLY",
-          "inputs": ["v_lhs", "v_rhs"],
-          "outputs": ["v_mul"],
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_mul"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "SLICE",
-          "inputs": ["v_mul"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_mul"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "CAST",
-          "inputs": ["v_complex"],
-          "outputs": ["v_real"],
+          "inputs": [
+            "v_complex"
+          ],
+          "outputs": [
+            "v_real"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n3",
           "op": "SOFTMAX",
-          "inputs": ["v_real"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_real"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -792,23 +803,53 @@
         {
           "match": "value",
           "id": "v_mul",
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         },
         {
           "match": "value",
           "id": "v_complex",
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         },
         {
           "match": "value",
           "id": "v_real",
-          "dtype": {"$in": ["float32", "float64"]}
+          "dtype": {
+            "$in": [
+              "float32",
+              "float64"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
-        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n2",
+          "fromOutput": 0,
+          "toNode": "n3",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -822,16 +863,31 @@
           "match": "node",
           "id": "n0",
           "op": "WHERE",
-          "inputs": ["v_cond", "v_true", "v_false"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_cond",
+            "v_true",
+            "v_false"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
-          "op": {"$in": ["ADD", "SUBTRACT"]},
-          "inputs": ["v_complex"],
-          "outputs": ["v_out"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT"
+            ]
+          },
+          "inputs": [
+            "v_complex"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -839,12 +895,24 @@
         {
           "match": "value",
           "id": "v_complex",
-          "ndim": {"$gte": 2},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 2
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -858,16 +926,32 @@
           "match": "node",
           "id": "n0",
           "op": "WHERE",
-          "inputs": ["v_cond", "v_true", "v_false"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_cond",
+            "v_true",
+            "v_false"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
-          "op": {"$in": ["ADD", "SUBTRACT"]},
-          "inputs": ["v_other", "v_complex"],
-          "outputs": ["v_out"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT"
+            ]
+          },
+          "inputs": [
+            "v_other",
+            "v_complex"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -875,12 +959,24 @@
         {
           "match": "value",
           "id": "v_complex",
-          "ndim": {"$gte": 2},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 2
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 1}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 1
+        }
       ]
     },
     {
@@ -894,32 +990,49 @@
           "match": "node",
           "id": "n0",
           "op": "TRANSPOSE",
-          "inputs": ["v_src"],
-          "outputs": ["v_first"],
+          "inputs": [
+            "v_src"
+          ],
+          "outputs": [
+            "v_first"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "REDUCE_SUM",
-          "inputs": ["v_first"],
-          "outputs": ["v_reduce"],
+          "inputs": [
+            "v_first"
+          ],
+          "outputs": [
+            "v_reduce"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
           "op": "TRANSPOSE",
-          "inputs": ["v_reduce"],
-          "outputs": ["v_second"],
+          "inputs": [
+            "v_reduce"
+          ],
+          "outputs": [
+            "v_second"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n3",
           "op": "MULTIPLY",
-          "inputs": ["v_first", "v_second"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_first",
+            "v_second"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -927,21 +1040,55 @@
         {
           "match": "value",
           "id": "v_first",
-          "ndim": {"$gte": 4},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 4
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         },
         {
           "match": "value",
           "id": "v_second",
-          "ndim": {"$gte": 3},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 3
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n3", "toInput": 0},
-        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 1}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n3",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n2",
+          "fromOutput": 0,
+          "toNode": "n3",
+          "toInput": 1
+        }
       ]
     },
     {
@@ -955,22 +1102,35 @@
           "match": "node",
           "id": "n0",
           "op": "RESHAPE",
-          "inputs": ["v_in"],
-          "outputs": ["v_reshape"],
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_reshape"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "REPLICATE_PAD",
-          "inputs": ["v_reshape"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_reshape"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
       "values": [],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -984,24 +1144,43 @@
           "match": "node",
           "id": "n0",
           "op": "WHERE",
-          "inputs": ["v_cond", "v_true", "v_false"],
-          "outputs": ["v_where"],
+          "inputs": [
+            "v_cond",
+            "v_true",
+            "v_false"
+          ],
+          "outputs": [
+            "v_where"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "CONCAT",
-          "inputs": ["v_where"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_where"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
-          "op": {"$in": ["ADD", "SUBTRACT"]},
-          "inputs": ["v_complex"],
-          "outputs": ["v_out"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT"
+            ]
+          },
+          "inputs": [
+            "v_complex"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -1009,13 +1188,30 @@
         {
           "match": "value",
           "id": "v_complex",
-          "ndim": {"$gte": 2},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 2
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
@@ -1029,24 +1225,43 @@
           "match": "node",
           "id": "n0",
           "op": "WHERE",
-          "inputs": ["v_cond", "v_true", "v_false"],
-          "outputs": ["v_where"],
+          "inputs": [
+            "v_cond",
+            "v_true",
+            "v_false"
+          ],
+          "outputs": [
+            "v_where"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n1",
           "op": "SQUEEZE",
-          "inputs": ["v_where"],
-          "outputs": ["v_complex"],
+          "inputs": [
+            "v_where"
+          ],
+          "outputs": [
+            "v_complex"
+          ],
           "attrs": {}
         },
         {
           "match": "node",
           "id": "n2",
-          "op": {"$in": ["ADD", "SUBTRACT"]},
-          "inputs": ["v_complex"],
-          "outputs": ["v_out"],
+          "op": {
+            "$in": [
+              "ADD",
+              "SUBTRACT"
+            ]
+          },
+          "inputs": [
+            "v_complex"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -1054,26 +1269,50 @@
         {
           "match": "value",
           "id": "v_complex",
-          "ndim": {"$gte": 2},
-          "dtype": {"$in": ["complex64", "complex128"]}
+          "ndim": {
+            "$gte": 2
+          },
+          "dtype": {
+            "$in": [
+              "complex64",
+              "complex128"
+            ]
+          }
         }
       ],
       "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
-        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        },
+        {
+          "fromNode": "n1",
+          "fromOutput": 0,
+          "toNode": "n2",
+          "toInput": 0
+        }
       ]
     },
     {
       "id": "pt-inductor-fp16-trans-to-trans",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU float16 TAN feeding TAN/SIN/COS exceeds verification tolerance",
+      "description": "Inductor CPU float16 transcendental operation feeding transcendental operation",
       "severity": "silent_correctness",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": "TAN",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS",
+              "ATAN"
+            ]
+          },
           "inputs": [
             "v_in"
           ],
@@ -1089,7 +1328,8 @@
             "$in": [
               "TAN",
               "SIN",
-              "COS"
+              "COS",
+              "ATAN"
             ]
           },
           "inputs": [
@@ -1124,46 +1364,6 @@
           "toNode": "n1",
           "toInput": 0
         }
-      ]
-    },
-    {
-      "id": "pt-inductor-fp16-atan-to-tan",
-      "compiler": "pytorch",
-      "target": "cpu",
-      "description": "Inductor CPU float16 ATAN feeding TAN exceeds verification tolerance",
-      "severity": "silent_correctness",
-      "nodes": [
-        {
-          "match": "node",
-          "id": "n0",
-          "op": "ATAN",
-          "inputs": ["v_in"],
-          "outputs": ["v_mid"],
-          "attrs": {}
-        },
-        {
-          "match": "node",
-          "id": "n1",
-          "op": "TAN",
-          "inputs": ["v_mid"],
-          "outputs": ["v_out"],
-          "attrs": {}
-        }
-      ],
-      "values": [
-        {
-          "match": "value",
-          "id": "v_mid",
-          "dtype": {"$eq": "float16"}
-        },
-        {
-          "match": "value",
-          "id": "v_out",
-          "dtype": {"$eq": "float16"}
-        }
-      ],
-      "flowConstraints": [
-        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
       ]
     },
     {
@@ -1315,8 +1515,13 @@
           "match": "node",
           "id": "n0",
           "op": "MATMUL",
-          "inputs": ["v_lhs", "v_rhs"],
-          "outputs": ["v_out"],
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_out"
+          ],
           "attrs": {}
         }
       ],
@@ -1324,16 +1529,158 @@
         {
           "match": "value",
           "id": "v_lhs",
-          "dtype": {"$in": ["int8", "uint8"]}
+          "dtype": {
+            "$in": [
+              "int8",
+              "uint8"
+            ]
+          }
         },
         {
           "match": "value",
           "id": "v_rhs",
-          "ndim": {"$gte": 3},
-          "dtype": {"$in": ["int8", "uint8"]},
+          "ndim": {
+            "$gte": 3
+          },
+          "dtype": {
+            "$in": [
+              "int8",
+              "uint8"
+            ]
+          },
           "expressionConstraints": [
-            {"dimIndices": [-1], "op": "add", "allowedValues": [1]}
+            {
+              "dimIndices": [
+                -1
+              ],
+              "op": "add",
+              "allowedValues": [
+                1
+              ]
+            }
           ]
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-matmul-to-trig",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Direct float16 MATMUL output consumed by TAN, SIN, or COS with float16 output",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MATMUL",
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {
+            "$in": [
+              "TAN",
+              "SIN",
+              "COS"
+            ]
+          },
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-add-to-tan",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Direct float16 ADD output consumed by TAN with float16 output",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ADD",
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "TAN",
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
         }
       ]
     }
