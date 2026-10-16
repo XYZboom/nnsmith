@@ -625,7 +625,7 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                     (producer_op, consumer_op, matched),
                 )
 
-    def test_fp16_matmul_to_trig_add_to_tan_and_sub_to_tan(self):
+    def test_fp16_matmul_and_arithmetic_to_trig_patterns(self):
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -664,6 +664,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertIn('pt-inductor-fp16-add-to-tan', matched)
 
         matched = {
+            p.id for p in dedup.matcher.match([add, node('SIN', ['mid'], ['out'])])
+        }
+        self.assertIn('pt-inductor-fp16-add-to-sin', matched)
+
+        matched = {
             p.id for p in dedup.matcher.match([sub, node('TAN', ['mid'], ['out'])])
         }
         self.assertIn('pt-inductor-fp16-sub-to-tan', matched)
@@ -683,6 +688,14 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         ):
             matched = {p.id for p in dedup.matcher.match([producer, consumer])}
             self.assertNotIn('pt-inductor-fp16-sub-to-tan', matched)
+
+        for producer, consumer in (
+            (add, node('COS', ['mid'], ['out'])),
+            (sub, node('SIN', ['mid'], ['out'])),
+            (add, node('SIN', ['other'], ['out'])),
+        ):
+            matched = {p.id for p in dedup.matcher.match([producer, consumer])}
+            self.assertNotIn('pt-inductor-fp16-add-to-sin', matched)
 
     def test_byte_matmul_requires_rhs_last_dimension_one(self):
         pattern_file = (
