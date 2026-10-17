@@ -690,6 +690,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         }
         self.assertIn('pt-inductor-fp16-gelu-to-floor', matched)
 
+        matched = {
+            p.id for p in dedup.matcher.match([gelu, node('ROUND', ['mid'], ['out'])])
+        }
+        self.assertIn('pt-inductor-fp16-gelu-to-round', matched)
+
         for producer, consumer in (
             (node('GELU', ['in'], ['mid'], dtype='float32'), node('FLOOR', ['mid'], ['out'], dtype='float32')),
             (gelu, node('CEIL', ['mid'], ['out'])),
@@ -698,6 +703,15 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         ):
             matched = {p.id for p in dedup.matcher.match([producer, consumer])}
             self.assertNotIn('pt-inductor-fp16-gelu-to-floor', matched)
+
+        for producer, consumer in (
+            (node('GELU', ['in'], ['mid'], dtype='float32'), node('ROUND', ['mid'], ['out'], dtype='float32')),
+            (gelu, node('CEIL', ['mid'], ['out'])),
+            (add, node('ROUND', ['mid'], ['out'])),
+            (gelu, node('ROUND', ['other'], ['out'])),
+        ):
+            matched = {p.id for p in dedup.matcher.match([producer, consumer])}
+            self.assertNotIn('pt-inductor-fp16-gelu-to-round', matched)
 
         for producer, consumer in (
             (add, node('SIN', ['mid'], ['out'])),
