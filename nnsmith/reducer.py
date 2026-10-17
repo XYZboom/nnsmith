@@ -15,7 +15,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 import numpy as np
 
 from nnsmith.abstract.op import Constant, Input, Placeholder
-from nnsmith.gir import GraphIR, InstIR
+from nnsmith.gir import GraphIR, InstExpr, InstIR
 from nnsmith.materialize import BugReport, Model, Oracle, Stage, Symptom, TestCase
 
 
@@ -161,6 +161,40 @@ def _compatible_replacement(gir: GraphIR, inst: InstIR, output: str) -> Optional
     return None
 
 
+_MODULE_STATE_RE = re.compile(r"^m(?P<index>\d+)(?P<suffix>\..+)$")
+
+
+def _remap_state_dict(
+    original_gir: GraphIR,
+    candidate_gir: GraphIR,
+    original_state: Dict,
+    expected_keys: Iterable[str],
+) -> Dict:
+    """Map positional SymbolNet module keys by stable GraphIR identifiers."""
+    original_index = {
+        inst.identifier: index for index, inst in enumerate(original_gir.insts)
+    }
+    remapped = {}
+    for expected_key in expected_keys:
+        match = _MODULE_STATE_RE.match(expected_key)
+        if match is None:
+            source_key = expected_key
+        else:
+            candidate_index = int(match.group("index"))
+            if candidate_index >= len(candidate_gir.insts):
+                raise KeyError(f"Invalid candidate state key: {expected_key}")
+            identifier = candidate_gir.insts[candidate_index].identifier
+            if identifier not in original_index:
+                raise KeyError(f"Unknown candidate instruction identifier: {identifier}")
+            source_key = f"m{original_index[identifier]}{match.group('suffix')}"
+        if source_key not in original_state:
+            raise KeyError(
+                f"Cannot map candidate state key {expected_key} from {source_key}"
+            )
+        remapped[expected_key] = original_state[source_key]
+    return remapped
+
+
 def _apply_removed_nodes(
     gir: GraphIR,
     kept_compute_ids: Set[int],
@@ -174,6 +208,7 @@ def _apply_removed_nodes(
         if _is_compute(inst) and inst.identifier not in kept_compute_ids
     ]
     for inst in reversed(removable):
+        promoted_to_input = False
         for output in inst.retvals():
             users = [user for user in ret.insts if output in user.iexpr.args]
             is_output = output in output_map
@@ -181,13 +216,27 @@ def _apply_removed_nodes(
                 continue
             replacement = _compatible_replacement(ret, inst, output)
             if replacement is None:
-                return None
+                # AIFuzzer-style CONSTANT_TO_INPUT fallback: preserve the exact
+                # intermediate tensor as a new graph input when a shape-changing
+                # node cannot be wired around. ReportPropertyChecker supplies the
+                # original eager intermediate value for this promoted input.
+                if inst.n_output() != 1 or is_output:
+                    return None
+                out_type = ret.vars.get(output)
+                if out_type is None:
+                    return None
+                input_op = Input(out_type.ndims)
+                input_op.abs_tensor = out_type
+                inst.iexpr = InstExpr(input_op, [])
+                promoted_to_input = True
+                continue
             for user in users:
                 user.iexpr.args = tuple(
                     replacement if arg == output else arg for arg in user.iexpr.args
                 )
             output_map = [replacement if value == output else value for value in output_map]
-        ret.insts.remove(inst)
+        if not promoted_to_input:
+            ret.insts.remove(inst)
 
     candidate = _slice_to_outputs(ret, list(dict.fromkeys(output_map)))
     return candidate
@@ -362,6 +411,7 @@ class ReportPropertyChecker:
         optmax: bool = True,
         equal_nan: bool = True,
         signature_regex: Optional[str] = None,
+        strict_failing_var: bool = False,
     ):
         self.report_dir = Path(report_dir)
         self.meta = _load_report_meta(self.report_dir)
@@ -375,6 +425,7 @@ class ReportPropertyChecker:
         self.crash_signature = derive_crash_signature(self.original_log)
         self.signature_regex = re.compile(signature_regex) if signature_regex else None
         self.equal_nan = equal_nan
+        self.strict_failing_var = strict_failing_var
 
         self.ModelType = Model.init("torch", target)
         self.factory = __import__(
@@ -386,19 +437,68 @@ class ReportPropertyChecker:
         self.state_dict_path = (
             self.report_dir / f"{self.ModelType.name_prefix()}{self.ModelType.name_suffix()}"
         )
+        with (self.report_dir / "gir.pkl").open("rb") as stream:
+            self.original_gir = pickle.load(stream)
+        import torch
+
+        self.original_state = torch.load(
+            self.state_dict_path, map_location="cpu", weights_only=True
+        )
+        self.intermediate_inputs = self._capture_intermediates(self.original_gir)
         self.last_bug: Optional[BugReport] = None
+
+    def _load_state(self, model, gir: GraphIR) -> None:
+        expected = model.torch_model.state_dict()
+        remapped = _remap_state_dict(
+            self.original_gir, gir, self.original_state, expected.keys()
+        )
+        model.torch_model.load_state_dict(remapped, strict=True)
+
+    def _capture_intermediates(self, gir: GraphIR) -> Dict[str, np.ndarray]:
+        """Capture eager values so removed subgraphs can become graph inputs."""
+        import torch
+
+        model = self.ModelType.from_gir(gir)
+        self._load_state(model, gir)
+        model.torch_model.eval()
+        tensor_map = model.torch_model.make_param_map()
+        for name in model.torch_model.input_map:
+            if name not in self.original_oracle.input:
+                continue
+            tensor_map[name] = torch.from_numpy(
+                np.asarray(self.original_oracle.input[name])
+            ).to(model.torch_model.device)
+        with torch.no_grad():
+            for inst, inps, outs, _ in model.torch_model.instructions:
+                values = inst(*[tensor_map[name] for name in inps])
+                if not isinstance(values, list):
+                    values = [values]
+                for name, value in zip(outs, values):
+                    tensor_map[name] = value
+        return {
+            name: value.detach().cpu().numpy()
+            for name, value in tensor_map.items()
+            if isinstance(value, torch.Tensor)
+        }
 
     def _build_testcase(self, gir: GraphIR) -> Optional[TestCase]:
         import torch
 
         model = self.ModelType.from_gir(gir)
-        state = torch.load(self.state_dict_path, map_location="cpu", weights_only=True)
-        model.torch_model.load_state_dict(state, strict=False)
+        try:
+            self._load_state(model, gir)
+        except Exception:
+            return None
+        model.torch_model.eval()
         inputs = {}
         for name in model.input_like:
-            if name not in self.original_oracle.input:
+            if name in self.original_oracle.input:
+                value = self.original_oracle.input[name]
+            elif name in self.intermediate_inputs:
+                value = self.intermediate_inputs[name]
+            else:
                 return None
-            inputs[name] = torch.from_numpy(np.asarray(self.original_oracle.input[name]))
+            inputs[name] = torch.from_numpy(np.asarray(value))
         model.sat_inputs = inputs
         oracle = model.make_oracle()
         testcase = TestCase(model, oracle)
@@ -412,7 +512,7 @@ class ReportPropertyChecker:
         if self.signature_regex is not None:
             return self.signature_regex.search(log) is not None
         if self.original_symptom == Symptom.INCONSISTENCY:
-            if self.failing_var is None:
+            if not self.strict_failing_var or self.failing_var is None:
                 return True
             match = _FAILING_VAR_RE.search(log)
             return match is not None and match.group("var") == self.failing_var
@@ -511,6 +611,7 @@ def main() -> None:
     parser.add_argument("--no-optmax", dest="optmax", action="store_false")
     parser.add_argument("--equal-nan", action="store_true", default=True, help="Equal NaN (default: True)")
     parser.add_argument("--no-equal-nan", dest="equal_nan", action="store_false")
+    parser.add_argument("--strict-var", action="store_true", default=False, help="Strictly match failing var")
     args = parser.parse_args()
 
     report_dir = Path(args.report)
@@ -524,6 +625,7 @@ def main() -> None:
         target=args.target,
         optmax=args.optmax,
         equal_nan=args.equal_nan,
+        strict_failing_var=args.strict_var,
     )
     reducer = GraphIRReducer(checker)
     res = reducer.reduce(gir)
