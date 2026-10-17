@@ -1857,6 +1857,64 @@
           "toInput": 0
         }
       ]
+    },
+    {
+      "id": "pt-inductor-fp16-multiply-to-tan",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Direct float16 MULTIPLY output consumed by TAN with float16 output",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MULTIPLY",
+          "inputs": [
+            "v_lhs",
+            "v_rhs"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "TAN",
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
     }
   ]
 }

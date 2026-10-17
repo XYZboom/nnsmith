@@ -650,6 +650,7 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         matmul = node('MATMUL', ['lhs', 'rhs'], ['mid'])
         add = node('ADD', ['lhs', 'rhs'], ['mid'])
         sub = node('SUBTRACT', ['lhs', 'rhs'], ['mid'])
+        mul = node('MULTIPLY', ['lhs', 'rhs'], ['mid'])
         for trig in ('TAN', 'SIN', 'COS'):
             matched = {
                 p.id for p in dedup.matcher.match(
@@ -677,6 +678,11 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
             p.id for p in dedup.matcher.match([sub, node('TAN', ['mid'], ['out'])])
         }
         self.assertIn('pt-inductor-fp16-sub-to-tan', matched)
+
+        matched = {
+            p.id for p in dedup.matcher.match([mul, node('TAN', ['mid'], ['out'])])
+        }
+        self.assertIn('pt-inductor-fp16-multiply-to-tan', matched)
 
         for producer, consumer in (
             (add, node('SIN', ['mid'], ['out'])),
@@ -709,6 +715,15 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         ):
             matched = {p.id for p in dedup.matcher.match([producer, consumer])}
             self.assertNotIn('pt-inductor-fp16-add-to-cos', matched)
+
+        for producer, consumer in (
+            (mul, node('SIN', ['mid'], ['out'])),
+            (mul, node('COS', ['mid'], ['out'])),
+            (add, node('TAN', ['mid'], ['out'])),
+            (mul, node('TAN', ['other'], ['out'])),
+        ):
+            matched = {p.id for p in dedup.matcher.match([producer, consumer])}
+            self.assertNotIn('pt-inductor-fp16-multiply-to-tan', matched)
 
     def test_byte_matmul_requires_rhs_last_dimension_one(self):
         pattern_file = (
