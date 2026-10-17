@@ -1915,6 +1915,63 @@
           "toInput": 0
         }
       ]
+    },
+    {
+      "id": "pt-inductor-fp16-gelu-to-floor",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Direct float16 GELU output consumed by FLOOR with float16 output",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "GELU",
+          "inputs": [
+            "v_in"
+          ],
+          "outputs": [
+            "v_mid"
+          ],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "FLOOR",
+          "inputs": [
+            "v_mid"
+          ],
+          "outputs": [
+            "v_out"
+          ],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {
+            "$eq": "float16"
+          }
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {
+            "$eq": "float16"
+          }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
     }
   ]
 }
