@@ -57,26 +57,31 @@ class PatternMatcher:
     def match(
         self, nodes: List[dict], required_node: Optional[dict] = None
     ) -> List[PatternDef]:
-        """Match patterns, optionally requiring an occurrence to contain one node."""
+        """Return unique patterns matching the node list."""
         matched = []
+        for pattern, _ in self.match_occurrences(nodes, required_node=required_node):
+            if pattern not in matched:
+                matched.append(pattern)
+        return matched
 
-        # Single-op patterns: straightforward
+    def match_occurrences(
+        self, nodes: List[dict], required_node: Optional[dict] = None
+    ) -> List[tuple]:
+        """Return matching patterns with the exact normalized node occurrence."""
+        occurrences = []
         candidate_nodes = [required_node] if required_node is not None else nodes
         for node in candidate_nodes:
             op = node['op']
-            if op in self.single_op_patterns:
-                for pattern in self.single_op_patterns[op]:
-                    if pattern not in matched and self._check_single_op(pattern, node, nodes):
-                        matched.append(pattern)
+            for pattern in self.single_op_patterns.get(op, []):
+                if self._check_single_op(pattern, node, nodes):
+                    occurrences.append((pattern, [node]))
 
-        # Multi-op patterns: sliding window
         for pattern in self.multi_op_patterns:
-            if pattern in matched:
-                continue
-            if self._check_multi_op(pattern, nodes, required_node=required_node):
-                matched.append(pattern)
-
-        return matched
+            windows = self._find_multi_op_occurrences(
+                pattern, nodes, required_node=required_node
+            )
+            occurrences.extend((pattern, window) for window in windows)
+        return occurrences
 
     def _check_single_op(self, pattern: PatternDef, node: dict,
                          all_nodes: List[dict]) -> bool:
@@ -119,22 +124,26 @@ class PatternMatcher:
         all_nodes: List[dict],
         required_node: Optional[dict] = None,
     ) -> bool:
-        """Check multi-op pattern by matching pattern nodes as a SUBSEQUENCE of
-        all_nodes (skipping unrelated nodes in between, e.g. dead code).
+        return bool(self._find_multi_op_occurrences(
+            pattern, all_nodes, required_node=required_node
+        ))
 
-        Enumerate structural subsequences so a required candidate can occupy any
-        pattern position. Flow constraints then verify exact dataflow.
-        """
+    def _find_multi_op_occurrences(
+        self,
+        pattern: PatternDef,
+        all_nodes: List[dict],
+        required_node: Optional[dict] = None,
+    ) -> List[List[dict]]:
+        """Return exact topological node subsequences matching a pattern."""
         n = len(pattern.nodes)
         if n > len(all_nodes):
-            return False
+            return []
 
         def occurrence_matches(window: List[dict]) -> bool:
             if required_node is not None and all(
                 node is not required_node for node in window
             ):
                 return False
-            # Pattern matched structurally. Check value constraints.
             for vid, pval in pattern.values.items():
                 actual_ref = self._find_actual_ref(vid, pattern, window, all_nodes)
                 if actual_ref is None:
@@ -148,17 +157,16 @@ class PatternMatcher:
                 if not self._check_value(pval, actual_ref):
                     return False
 
-            if not self._check_graph_constraints(pattern, len(all_nodes), all_nodes):
-                return False
-            if not self._check_flow_constraints(pattern, window):
-                return False
+            return (
+                self._check_graph_constraints(pattern, len(all_nodes), all_nodes)
+                and self._check_flow_constraints(pattern, window)
+            )
 
-            return True
-
-        def search(node_idx: int, pattern_idx: int, window: List[dict]) -> bool:
+        def search(node_idx: int, pattern_idx: int, window: List[dict]):
             if pattern_idx == n:
-                return occurrence_matches(window)
+                return [window] if occurrence_matches(window) else []
             remaining = n - pattern_idx
+            matches = []
             for idx in range(node_idx, len(all_nodes) - remaining + 1):
                 actual = all_nodes[idx]
                 pnode = pattern.nodes[pattern_idx]
@@ -168,9 +176,8 @@ class PatternMatcher:
                     continue
                 if not self._check_node_input_constraints(actual, pnode):
                     continue
-                if search(idx + 1, pattern_idx + 1, window + [actual]):
-                    return True
-            return False
+                matches.extend(search(idx + 1, pattern_idx + 1, window + [actual]))
+            return matches
 
         return search(0, 0, [])
 
@@ -376,6 +383,14 @@ class DedupMatcher:
         nodes = normalize_graph(ir, backend=self.backend)
         return self.matcher.match(nodes)
 
+    def match_occurrences(self, ir) -> List[tuple]:
+        """Return matched patterns with the exact GraphIR node occurrence."""
+        if not hasattr(self, 'matcher') or not self.patterns:
+            return []
+        from nnsmith.dedup.normalizer import normalize_graph
+        nodes = normalize_graph(ir, backend=self.backend)
+        return self.matcher.match_occurrences(nodes)
+
     def match_count(self, ir) -> int:
         """Return the number of matched patterns."""
         return len(self.matches(ir))
@@ -397,14 +412,18 @@ class DedupMatcher:
         """aiFuzzer-style online check: evaluate candidate node before committing to graph."""
         if not self.patterns:
             return None
+        if shape_model is not None:
+            import z3
+            shape_model = shape_model.translate(z3.Context())
         from nnsmith.dedup.normalizer import normalize_graph, normalize_node_dict
-        nodes = normalize_graph(gir, backend=self.backend)
+        nodes = normalize_graph(gir, backend=self.backend, shape_model=shape_model)
         cand_node = normalize_node_dict(
             candidate_op,
             input_vars,
             otensors,
             backend=self.backend,
             output_vars=output_vars,
+            shape_model=shape_model,
         )
         vars_map = dict(gir.vars)
         for idx, var_id in enumerate(input_vars):

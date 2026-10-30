@@ -464,7 +464,6 @@ class SymbolicGen(BaseGen):
         symbolic_init=True,
         **kwargs,
     ):
-        self.dedup_matcher = kwargs.pop('dedup_matcher', None)
         super().__init__(opset, seed, **kwargs)
         if seed is not None:
             set_z3_state(seed)
@@ -517,18 +516,6 @@ class SymbolicGen(BaseGen):
 
         if check_res != z3.sat:
             return False
-
-        # aiFuzzer-style pre-dedup online check (post-generation, pre-commit)
-        if getattr(self, 'dedup_matcher', None) is not None:
-            matched = self.dedup_matcher.on_node_generated(
-                self.ir,
-                node,
-                input_vars,
-                otensors,
-                shape_model=self.last_solution,
-            )
-            if matched is not None:
-                return False
 
         for c in constraints:
             self.assume(c)
@@ -589,24 +576,6 @@ class SymbolicGen(BaseGen):
 
         if check_res != z3.sat:
             return False
-
-        # Check the hypothetical producer before committing its input
-        # placeholders or replacing the existing output placeholders.
-        if getattr(self, "dedup_matcher", None) is not None:
-            input_vars = [
-                f"__dedup_candidate_input_{idx}" for idx in range(len(itensors))
-            ]
-            matched = self.dedup_matcher.on_node_generated(
-                self.ir,
-                node,
-                input_vars,
-                inferred_otensors,
-                output_vars=phvars,
-                input_tensors=itensors,
-                shape_model=self.last_solution,
-            )
-            if matched is not None:
-                return False
 
         if MGEN_LOG.getEffectiveLevel() <= logging.DEBUG:
             MGEN_LOG.debug(f">> Backward insert: {node}")

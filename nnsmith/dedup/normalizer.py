@@ -178,21 +178,38 @@ def get_op_name(op) -> str:
     return raw
 
 
-def _shape_to_list(shape, model=None) -> List[int]:
-    """Convert a shape (tuple/list/tvm shape) to a list of concrete ints.
-    Returns [] if shape is symbolic (not integer)."""
+def _shape_to_list(shape, model=None) -> List[Optional[int]]:
+    """Convert dimensions without consuming the generator's Z3 context state.
+
+    Numeric pattern constraints fail closed on unassigned symbolic dimensions.
+    A raw model is translated to a private context before evaluating shapes.
+    """
     if shape is None:
         return []
-    try:
-        if model is not None:
-            shape = [
-                model.eval(d, model_completion=True) if hasattr(d, 'as_ast') else d
-                for d in shape
-            ]
-        return [int(d.as_long()) if hasattr(d, 'as_long') else int(d) for d in shape]
-    except (TypeError, ValueError):
-        # Symbolic dims (z3) — return placeholder
-        return [d for d in shape]
+
+    symbolic_dims = [dim for dim in shape if hasattr(dim, 'as_ast')]
+    if model is not None and any(dim.ctx == model.ctx for dim in symbolic_dims):
+        import z3
+        model = model.translate(z3.Context())
+
+    result = []
+    for dim in shape:
+        value = dim
+        if hasattr(dim, 'as_ast'):
+            if model is None:
+                result.append(None)
+                continue
+            if dim.ctx != model.ctx:
+                dim = dim.translate(model.ctx)
+            value = model.eval(dim, model_completion=False)
+        if hasattr(value, 'as_long'):
+            result.append(int(value.as_long()))
+        else:
+            try:
+                result.append(int(value))
+            except (TypeError, ValueError):
+                result.append(None)
+    return result
 
 
 def _dtype_to_str(dtype) -> str:
@@ -288,6 +305,7 @@ def normalize_graph(ir, backend: str = 'torch', shape_model: Any = None) -> List
                 })
 
         node = {
+            'inst_id': getattr(inst, 'identifier', None),
             'op': pattern_op,
             'attrs': attrs,
             'inputs': input_info,
@@ -306,6 +324,7 @@ def normalize_node_dict(
     otensors: List[Any],
     backend: str = 'torch',
     output_vars: Optional[List[str]] = None,
+    shape_model: Any = None,
 ) -> dict:
     """Normalize an uncommitted candidate node during graph generation."""
     op_name = get_op_name(candidate_op)
@@ -337,7 +356,7 @@ def normalize_node_dict(
         shape = getattr(ot, 'shape', [])
         dtype = getattr(ot, 'dtype', 'unknown')
         ref = {
-            'shape': _shape_to_list(shape),
+            'shape': _shape_to_list(shape, model=shape_model),
             'dtype': _dtype_to_str(dtype),
         }
         if output_vars is not None and idx < len(output_vars):

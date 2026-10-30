@@ -209,7 +209,7 @@ class SymbolNet(nn.Module):
                         torch.where(
                             param.isnan().logical_or(param.isinf()),
                             random_tensor(
-                                shape=param.shape, dtype=param.dtype.torch()
+                                shape=param.shape, dtype=param.dtype
                             ).to(param.device),
                             param,
                         )

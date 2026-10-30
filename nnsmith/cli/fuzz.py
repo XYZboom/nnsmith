@@ -297,30 +297,75 @@ class FuzzingLoop:
             timeout_ms=mgen_cfg["timeout_ms"],
             rank_choices=mgen_cfg["rank_choices"],
             dtype_choices=mgen_cfg["dtype_choices"],
-            dedup_matcher=self.dedup_matcher,
         )
         return gen.make_concrete()
 
     def make_testcase(self, seed) -> TestCase:
-        prev_prevented = getattr(self.dedup_matcher, 'prevented_count', 0) if self.dedup_matcher else 0
-        prev_pattern_hits = dict(getattr(self.dedup_matcher, 'prevented_by_pattern', {})) if self.dedup_matcher else {}
         ir = self.make_concrete_gir(seed)
-        curr_prevented = getattr(self.dedup_matcher, 'prevented_count', 0) if self.dedup_matcher else 0
 
-        if curr_prevented > prev_prevented:
-            n_intercepted = curr_prevented - prev_prevented
-            curr_pattern_hits = dict(getattr(self.dedup_matcher, 'prevented_by_pattern', {}))
-            pattern_hits = {
-                pattern_id: count - prev_pattern_hits.get(pattern_id, 0)
-                for pattern_id, count in curr_pattern_hits.items()
-                if count > prev_pattern_hits.get(pattern_id, 0)
-            }
-            self.n_dedup_rewrite += n_intercepted
-            FUZZ_LOG.info(
-                f"Pre-dedup: seed {seed} intercepted {n_intercepted} bug pattern "
-                f"node(s) during generation; pattern_hits={json.dumps(pattern_hits, sort_keys=True)} "
-                f"(resampled without seed change)"
-            )
+        if self.dedup_matcher is not None:
+            matched_occurrences = self.dedup_matcher.match_occurrences(ir)
+            if matched_occurrences:
+                from nnsmith.dedup.rewrite import rewrite_gir
+
+                pattern_counts = {}
+                initial_occurrence_keys = set()
+                for pattern, nodes in matched_occurrences:
+                    pattern_counts[pattern.id] = pattern_counts.get(pattern.id, 0) + 1
+                    initial_occurrence_keys.add(
+                        (pattern.id, tuple(node.get('inst_id') for node in nodes))
+                    )
+                original_op_by_id = {
+                    inst.identifier: type(inst.iexpr.op).__name__ for inst in ir.insts
+                }
+                rewritten = rewrite_gir(ir, self.dedup_matcher)
+                if rewritten is None:
+                    rewritten_ops = {}
+                    inserted_ops = {}
+                else:
+                    rewritten_op_by_id = {
+                        inst.identifier: type(inst.iexpr.op).__name__ for inst in rewritten.insts
+                    }
+                    rewritten_ops = {
+                        str(inst_id): f"{op_name}->{rewritten_op_by_id[inst_id]}"
+                        for inst_id, op_name in original_op_by_id.items()
+                        if inst_id in rewritten_op_by_id
+                        and rewritten_op_by_id[inst_id] != op_name
+                    }
+                    inserted_ops = {
+                        str(inst.identifier): type(inst.iexpr.op).__name__
+                        for inst in rewritten.insts
+                        if inst.identifier not in original_op_by_id
+                    }
+                if rewritten is None:
+                    self.n_dedup_rewrite_fail += 1
+                    FUZZ_LOG.warning(
+                        f"Local pre-dedup: seed {seed} pattern_matches="
+                        f"{json.dumps(pattern_counts, sort_keys=True)} rewrite=failed; "
+                        "original GIR retained"
+                    )
+                else:
+                    ir = rewritten
+                    residual_occurrences = self.dedup_matcher.match_occurrences(ir)
+                    residual_counts = {}
+                    residual_occurrence_keys = set()
+                    for pattern, nodes in residual_occurrences:
+                        residual_counts[pattern.id] = residual_counts.get(pattern.id, 0) + 1
+                        residual_occurrence_keys.add(
+                            (pattern.id, tuple(node.get('inst_id') for node in nodes))
+                        )
+                    removed_occurrences = len(initial_occurrence_keys - residual_occurrence_keys)
+                    rewrite_status = 'partial' if residual_occurrences else 'applied'
+                    self.n_dedup_rewrite += removed_occurrences
+                    FUZZ_LOG.info(
+                        f"Local pre-dedup: seed {seed} pattern_matches="
+                        f"{json.dumps(pattern_counts, sort_keys=True)} rewrite={rewrite_status}; "
+                        f"rewritten_occurrences={removed_occurrences}; "
+                        f"remaining_pattern_matches={json.dumps(residual_counts, sort_keys=True)}; "
+                        f"rewritten_ops={json.dumps(rewritten_ops, sort_keys=True)}; "
+                        f"inserted_ops={json.dumps(inserted_ops, sort_keys=True)}; "
+                        "same seed and original GIR, local rewrite only"
+                    )
 
         model = self.ModelType.from_gir(ir)
         if self.cfg["debug"]["viz"]:

@@ -133,7 +133,8 @@
             "$in": [
               "BICUBIC_INTERP",
               "TRILINEAR_INTERP",
-              "BILINEAR_INTERP"
+              "BILINEAR_INTERP",
+              "NEAREST_INTERP"
             ]
           },
           "inputs": [
@@ -281,7 +282,7 @@
       "id": "pt-inductor-cpu-byte-argreduce-tie",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU vectorized argmin/argmax mismatch on int8/uint8 inputs due to non-deterministic tie-breaking across SIMD vector lanes",
+      "description": "Intermittent, vectorization-sensitive wrong-code observed for Inductor CPU byte ArgMin/ArgMax with reduction extent at least 16; widening the input to int64 avoids the reduced reproduction",
       "severity": "silent_correctness",
       "nodes": [
         {
@@ -299,7 +300,7 @@
           "outputs": [
             "v_out"
           ],
-          "attrs": {}
+          "attrs": {"axis_len": {"$gte": 16}}
         }
       ],
       "values": [
@@ -319,7 +320,7 @@
       "id": "pt-inductor-int-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies",
+      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies on non-singleton reduction axes",
       "severity": "crash",
       "nodes": [
         {
@@ -337,7 +338,7 @@
           "outputs": [
             "v_out"
           ],
-          "attrs": {}
+          "attrs": {"axis_len": {"$gte": 2}}
         }
       ],
       "values": [
@@ -1974,6 +1975,48 @@
       ]
     },
     {
+      "id": "pt-inductor-fp16-reducesum-round-rank1",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "FP16 ReduceSum followed by Round on rank-1 vector outputs (vectorized wrong-code)",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "REDUCE_SUM",
+          "inputs": ["v_in"],
+          "outputs": ["v_mid"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "ROUND",
+          "inputs": ["v_mid"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "ndim": {"$eq": 1},
+          "shape": [{"$gte": 2}],
+          "dtype": {"$eq": "float16"}
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
+    },
+    {
       "id": "pt-inductor-fp16-gelu-to-round",
       "compiler": "pytorch",
       "target": "cpu",
@@ -2019,6 +2062,51 @@
           "dtype": {
             "$eq": "float16"
           }
+        }
+      ],
+      "flowConstraints": [
+        {
+          "fromNode": "n0",
+          "fromOutput": 0,
+          "toNode": "n1",
+          "toInput": 0
+        }
+      ]
+    },
+    {
+      "id": "pt-inductor-fp16-multiply-to-cast-int32",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "FP16 multiplication consumed by an int32 cast can round across an integer boundary incorrectly",
+      "severity": "silent_correctness",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "MULTIPLY",
+          "inputs": ["v_lhs", "v_rhs"],
+          "outputs": ["v_mid"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "CAST",
+          "inputs": ["v_mid"],
+          "outputs": ["v_out"],
+          "attrs": {}
+        }
+      ],
+      "values": [
+        {
+          "match": "value",
+          "id": "v_mid",
+          "dtype": {"$eq": "float16"}
+        },
+        {
+          "match": "value",
+          "id": "v_out",
+          "dtype": {"$eq": "int32"}
         }
       ],
       "flowConstraints": [
