@@ -968,6 +968,56 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         ).reshape(4, 1, 7)
         self.assertTrue(torch.equal(SymbolNet(gir)(x)[0], SymbolNet(rewritten)(x)[0]))
 
+    def test_int16_neg_clip_rewrite_widens_and_preserves_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        gir = GraphIR()
+        input_op = AOP.Input(2)
+        input_op.abs_tensor = AbsTensor([2, 4], DType.int16)
+        source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+        neg_op = AOP.Neg()
+        neg_inputs = [gir.vars[source]]
+        neg_outputs = neg_op.type_transfer(neg_inputs)
+        neg_op.bind_input_like(neg_inputs)
+        neg_op.bind_output_like(neg_outputs)
+        neg_inst = gir.add_inst(InstExpr(neg_op, (source,)))
+        clip_op = AOP.Clip()
+        clip_inputs = [gir.vars[neg_inst.retval()]]
+        clip_outputs = clip_op.type_transfer(clip_inputs)
+        clip_op.bind_input_like(clip_inputs)
+        clip_op.bind_output_like(clip_outputs)
+        clip_inst = gir.add_inst(InstExpr(clip_op, (neg_inst.retval(),)))
+        gir.assert_wellform()
+
+        rewritten = rewrite_gir(gir, matcher)
+        self.assertIsNotNone(rewritten)
+        assert rewritten is not None
+        rewritten.assert_wellform()
+        self.assertEqual(
+            [type(inst.iexpr.op).__name__ for inst in rewritten.insts],
+            ['Input', 'Neg', 'CastI64', 'Clip', 'Cast'],
+        )
+        rewritten_clip = rewritten.find_inst_by_id(clip_inst.identifier)
+        assert rewritten_clip is not None
+        self.assertEqual(rewritten.vars[rewritten_clip.iexpr.args[0]].dtype, DType.int64)
+        self.assertEqual(rewritten.vars[rewritten_clip.retval()].dtype, DType.int64)
+        x = torch.tensor(
+            [-32768, -5, -1, 0, 1, 5, 32767, -32767], dtype=torch.int16
+        ).reshape(2, 4)
+        self.assertTrue(torch.equal(SymbolNet(gir)(x)[0], SymbolNet(rewritten)(x)[0]))
+
     def test_int_clip_rewrite_rejects_unvalidated_producer(self):
         from typing import cast
 
@@ -982,7 +1032,7 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         )
         gir = GraphIR()
         input_op = AOP.Input(2)
-        input_op.abs_tensor = AbsTensor([4, 7], DType.int16)
+        input_op.abs_tensor = AbsTensor([4, 7], DType.int8)
         source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
         neg_op = AOP.Neg()
         neg_inputs = [gir.vars[source]]
