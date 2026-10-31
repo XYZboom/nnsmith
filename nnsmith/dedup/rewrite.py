@@ -169,8 +169,230 @@ def _rewrite_byte_argreduce_with_int64(gir, idx):
         return None
 
 
+def _collect_narrow_unary_nodes(gir, value, dtype):
+    """Return promotion-sensitive unary IDs on a safe single-input ancestor path."""
+    view_ops = {'Concat1', 'Slice', 'Reshape', 'Transpose', 'Squeeze', 'Flatten'}
+    unary_ids = []
+    visited = set()
+    has_narrowing_cast = False
+    current = value
+
+    for _ in range(len(gir.insts) + 1):
+        producer_id, _ = InstIR.var_inst_idx(current)
+        if producer_id in visited:
+            return None
+        visited.add(producer_id)
+        producer = gir.find_inst_by_id(producer_id)
+        tensor = gir.vars.get(current)
+        if producer is None or tensor is None:
+            return None
+        op = producer.iexpr.op
+        op_name = type(op).__name__
+
+        if op_name in ('Input', 'Constant'):
+            return unary_ids, has_narrowing_cast
+        if op_name in view_ops and len(producer.iexpr.args) == 1:
+            current = producer.iexpr.args[0]
+            continue
+        if op_name in ('Abs', 'Neg') and tensor.dtype == dtype and len(producer.iexpr.args) == 1:
+            input_tensor = gir.vars.get(producer.iexpr.args[0])
+            if input_tensor is None or input_tensor.dtype != dtype:
+                return None
+            unary_ids.append(producer.identifier)
+            current = producer.iexpr.args[0]
+            continue
+        if op_name == 'Cast' and len(producer.iexpr.args) == 1:
+            input_tensor = gir.vars.get(producer.iexpr.args[0])
+            if input_tensor is None:
+                return None
+            if tensor.dtype == dtype and input_tensor.dtype != dtype:
+                return unary_ids, True
+            if tensor.dtype == input_tensor.dtype:
+                current = producer.iexpr.args[0]
+                continue
+            return unary_ids, has_narrowing_cast
+        # Stop at the first unmodified producer. Casts are inserted only around
+        # the collected Abs/Neg nodes, so this producer retains its narrow semantics.
+        return unary_ids, has_narrowing_cast
+
+    return None
+
+
+def _widen_narrow_unary_preserving_wrap(gir, inst_id):
+    """Compute int8/int16 Abs/Neg in int64, then restore the original wrap width."""
+    inst = gir.find_inst_by_id(inst_id)
+    if (
+        inst is None
+        or type(inst.iexpr.op).__name__ not in ('Abs', 'Neg')
+        or len(inst.iexpr.args) != 1
+        or inst.n_output() != 1
+    ):
+        return False
+    input_var = inst.iexpr.args[0]
+    output_var = inst.retval()
+    input_tensor = gir.vars.get(input_var)
+    output_tensor = gir.vars.get(output_var)
+    if (
+        input_tensor is None
+        or output_tensor is None
+        or input_tensor.dtype not in (DType.int8, DType.int16)
+        or input_tensor.dtype != output_tensor.dtype
+    ):
+        return False
+    old_users = list(inst.users[0])
+
+    try:
+        cast_up = AOP.CastI64()
+        cast_up_inputs = [AbsTensor(list(input_tensor.shape), input_tensor.dtype)]
+        cast_up_outputs = cast_up.type_transfer(cast_up_inputs)
+        if len(cast_up_outputs) != 1 or cast_up_outputs[0].dtype != DType.int64:
+            return False
+        if any(not bool(c) for c in cast_up.checked_requires(cast_up_inputs)):
+            return False
+        cast_up.bind_input_like(cast_up_inputs)
+        cast_up.bind_output_like(cast_up_outputs)
+        cast_up_inst = gir.add_inst(InstExpr(cast_up, (input_var,)))
+
+        inst.iexpr.args = list(inst.iexpr.args)
+        gir.replace_arg(inst, 0, cast_up_inst.retval(), type_check=False)
+        inst.iexpr.args = tuple(inst.iexpr.args)
+
+        wide_op = copy.deepcopy(inst.iexpr.op)
+        wide_outputs = wide_op.type_transfer(cast_up_outputs)
+        if (
+            len(wide_outputs) != 1
+            or list(wide_outputs[0].shape) != list(output_tensor.shape)
+            or wide_outputs[0].dtype != DType.int64
+        ):
+            return False
+        if any(not bool(c) for c in wide_op.checked_requires(cast_up_outputs)):
+            return False
+        wide_op.bind_input_like(cast_up_outputs)
+        wide_op.bind_output_like(wide_outputs)
+        inst.iexpr.op = wide_op
+        gir.vars[output_var] = AbsTensor(list(wide_outputs[0].shape), DType.int64)
+
+        cast_down = AOP.Cast(input_tensor.dtype)
+        cast_down_inputs = [gir.vars[output_var]]
+        cast_down_outputs = cast_down.type_transfer(cast_down_inputs)
+        if (
+            len(cast_down_outputs) != 1
+            or list(cast_down_outputs[0].shape) != list(output_tensor.shape)
+            or cast_down_outputs[0].dtype != output_tensor.dtype
+        ):
+            return False
+        if any(not bool(c) for c in cast_down.checked_requires(cast_down_inputs)):
+            return False
+        cast_down.bind_input_like(cast_down_inputs)
+        cast_down.bind_output_like(cast_down_outputs)
+        cast_down_inst = gir.add_inst(InstExpr(cast_down, (output_var,)))
+
+        for old_user in old_users:
+            user = gir.find_inst_by_id(old_user.identifier)
+            if user is None:
+                return False
+            for arg_idx, arg in enumerate(list(user.iexpr.args)):
+                if arg == output_var:
+                    user.iexpr.args = list(user.iexpr.args)
+                    gir.replace_arg(user, arg_idx, cast_down_inst.retval(), type_check=False)
+                    user.iexpr.args = tuple(user.iexpr.args)
+        gir.assert_wellform()
+        return True
+    except Exception:
+        return False
+
+
+def _rewrite_int16_argreduce_after_safe_producer(gir, idx):
+    """Widen only after preserving every int16 wrap in the ArgMin/ArgMax input path."""
+    inst = gir.insts[idx]
+    if type(inst.iexpr.op).__name__ not in ('ArgMin', 'ArgMax') or len(inst.iexpr.args) != 1:
+        return None
+    source = inst.iexpr.args[0]
+    source_tensor = gir.vars.get(source)
+    if source_tensor is None or source_tensor.dtype != DType.int16:
+        return None
+    producer_id, _ = InstIR.var_inst_idx(source)
+    producer = gir.find_inst_by_id(producer_id)
+    producer_name = type(producer.iexpr.op).__name__ if producer is not None else None
+    if producer_name in ('Abs', 'Concat1', 'Cast', 'Flatten'):
+        pass
+    elif producer_name in ('ExpandLast4', 'Slice', 'ReduceMin', 'ReduceMax'):
+        if producer is None or len(producer.iexpr.args) != 1:
+            return None
+        upstream_id, _ = InstIR.var_inst_idx(producer.iexpr.args[0])
+        upstream = gir.find_inst_by_id(upstream_id)
+        upstream_name = type(upstream.iexpr.op).__name__ if upstream is not None else None
+        if upstream_name != 'Abs':
+            if producer_name != 'ReduceMin' or upstream_name != 'Squeeze':
+                return None
+            if upstream is None or len(upstream.iexpr.args) != 1:
+                return None
+            ancestor_id, _ = InstIR.var_inst_idx(upstream.iexpr.args[0])
+            ancestor = gir.find_inst_by_id(ancestor_id)
+            if ancestor is None or type(ancestor.iexpr.op).__name__ != 'Abs':
+                return None
+    else:
+        return None
+    unary_nodes = _collect_narrow_unary_nodes(gir, source, DType.int16)
+    if unary_nodes is None:
+        return None
+
+    original_outputs = [gir.vars.get(inst.retval(i)) for i in range(inst.n_output())]
+    if any(output is None for output in original_outputs):
+        return None
+    rewritten = copy.deepcopy(gir)
+    for unary_id in reversed(unary_nodes[0]):
+        if not _widen_narrow_unary_preserving_wrap(rewritten, unary_id):
+            return None
+    rewritten_inst = rewritten.find_inst_by_id(inst.identifier)
+    if rewritten_inst is None:
+        return None
+    source = rewritten_inst.iexpr.args[0]
+    source_tensor = rewritten.vars.get(source)
+    if source_tensor is None or source_tensor.dtype != DType.int16:
+        return None
+
+    try:
+        cast_op = AOP.CastI64()
+        cast_inputs = [AbsTensor(list(source_tensor.shape), source_tensor.dtype)]
+        cast_outputs = cast_op.type_transfer(cast_inputs)
+        cast_constraints = cast_op.checked_requires(cast_inputs)
+        if len(cast_outputs) != 1 or cast_outputs[0].dtype != DType.int64:
+            return None
+        if any(not bool(constraint) for constraint in cast_constraints):
+            return None
+        cast_op.bind_input_like(cast_inputs)
+        cast_op.bind_output_like(cast_outputs)
+
+        argreduce_op = copy.deepcopy(rewritten_inst.iexpr.op)
+        widened_outputs = argreduce_op.type_transfer(cast_outputs)
+        argreduce_constraints = argreduce_op.checked_requires(cast_outputs)
+        if any(not bool(constraint) for constraint in argreduce_constraints):
+            return None
+        if len(widened_outputs) != len(original_outputs):
+            return None
+        for widened, original in zip(widened_outputs, original_outputs):
+            if (
+                list(widened.shape) != list(original.shape)
+                or widened.dtype != original.dtype
+            ):
+                return None
+        argreduce_op.bind_input_like(cast_outputs)
+        argreduce_op.bind_output_like(widened_outputs)
+
+        cast_inst = rewritten.add_inst(InstExpr(cast_op, (source,)))
+        rewritten_inst.iexpr.args = list(rewritten_inst.iexpr.args)
+        rewritten.replace_arg(rewritten_inst, 0, cast_inst.retval(), type_check=False)
+        rewritten_inst.iexpr.args = tuple(rewritten_inst.iexpr.args)
+        rewritten_inst.iexpr.op = argreduce_op
+        rewritten.assert_wellform()
+        return rewritten
+    except Exception:
+        return None
+
+
 def _rewrite_abs_neg_squeeze_clip_with_int64(gir, idx):
-    """Widen validated narrow-integer producer->Clip boundaries."""
+    """Widen Clip after explicitly restoring narrow Abs/Neg wrap semantics."""
     inst = gir.insts[idx]
     if type(inst.iexpr.op).__name__ != 'Clip' or len(inst.iexpr.args) != 1:
         return None
@@ -178,38 +400,57 @@ def _rewrite_abs_neg_squeeze_clip_with_int64(gir, idx):
     source_tensor = gir.vars.get(source)
     if source_tensor is None or source_tensor.dtype not in (DType.int8, DType.int16):
         return None
-    producer_id, _ = InstIR.var_inst_idx(source)
-    producer = gir.find_inst_by_id(producer_id)
-    producer_name = type(producer.iexpr.op).__name__ if producer is not None else None
-    if producer_name not in ('Abs', 'Squeeze') and not (
-        producer_name == 'Neg' and source_tensor.dtype == DType.int16
-    ):
+    chain = _collect_narrow_unary_nodes(gir, source, source_tensor.dtype)
+    if chain is None or not chain[0] and not chain[1]:
         return None
-
+    for position, unary_id in enumerate(chain[0]):
+        unary_inst = gir.find_inst_by_id(unary_id)
+        if unary_inst is None:
+            return None
+        if type(unary_inst.iexpr.op).__name__ == 'Neg':
+            neg_input = gir.vars.get(unary_inst.iexpr.args[0])
+            if neg_input is None:
+                return None
+            if neg_input.dtype == DType.int16:
+                continue
+            # int8 Neg -> Clip alone remains fail-closed. When a downstream
+            # Abs is present, each unary op is widened and cast back separately,
+            # preserving the int8 wrap at both Neg and Abs boundaries.
+            if neg_input.dtype != DType.int8 or not any(
+                type(gir.find_inst_by_id(downstream_id).iexpr.op).__name__ == 'Abs'
+                for downstream_id in chain[0][:position]
+                if gir.find_inst_by_id(downstream_id) is not None
+            ):
+                return None
     original_output = gir.vars.get(inst.retval())
     if original_output is None:
         return None
+
     rewritten = copy.deepcopy(gir)
+    for unary_id in reversed(chain[0]):
+        if not _widen_narrow_unary_preserving_wrap(rewritten, unary_id):
+            return None
     inst = rewritten.find_inst_by_id(inst.identifier)
     if inst is None:
         return None
+    source = inst.iexpr.args[0]
+    source_tensor = rewritten.vars.get(source)
+    if source_tensor is None or source_tensor.dtype not in (DType.int8, DType.int16):
+        return None
     old_output = inst.retval()
     old_users = list(inst.users[0])
-    source_tensor = rewritten.vars[source]
 
     try:
         cast_up = AOP.CastI64()
         cast_up_inputs = [AbsTensor(list(source_tensor.shape), source_tensor.dtype)]
         cast_up_outputs = cast_up.type_transfer(cast_up_inputs)
-        cast_up_constraints = cast_up.checked_requires(cast_up_inputs)
         if len(cast_up_outputs) != 1 or cast_up_outputs[0].dtype != DType.int64:
             return None
-        if any(not bool(constraint) for constraint in cast_up_constraints):
+        if any(not bool(c) for c in cast_up.checked_requires(cast_up_inputs)):
             return None
         cast_up.bind_input_like(cast_up_inputs)
         cast_up.bind_output_like(cast_up_outputs)
         cast_up_inst = rewritten.add_inst(InstExpr(cast_up, (source,)))
-
         inst.iexpr.args = list(inst.iexpr.args)
         rewritten.replace_arg(inst, 0, cast_up_inst.retval(), type_check=False)
         inst.iexpr.args = tuple(inst.iexpr.args)
@@ -217,44 +458,41 @@ def _rewrite_abs_neg_squeeze_clip_with_int64(gir, idx):
         clip_op = copy.deepcopy(inst.iexpr.op)
         clip_inputs = [AbsTensor(list(cast_up_outputs[0].shape), DType.int64)]
         clip_outputs = clip_op.type_transfer(clip_inputs)
-        clip_constraints = clip_op.checked_requires(clip_inputs)
-        if len(clip_outputs) != 1 or clip_outputs[0].dtype != DType.int64:
+        if (
+            len(clip_outputs) != 1
+            or clip_outputs[0].dtype != DType.int64
+            or list(clip_outputs[0].shape) != list(original_output.shape)
+        ):
             return None
-        if list(clip_outputs[0].shape) != list(original_output.shape):
-            return None
-        if any(not bool(constraint) for constraint in clip_constraints):
+        if any(not bool(c) for c in clip_op.checked_requires(clip_inputs)):
             return None
         clip_op.bind_input_like(clip_inputs)
         clip_op.bind_output_like(clip_outputs)
         inst.iexpr.op = clip_op
-        rewritten.vars[old_output] = AbsTensor(
-            list(clip_outputs[0].shape), clip_outputs[0].dtype
-        )
+        rewritten.vars[old_output] = AbsTensor(list(clip_outputs[0].shape), DType.int64)
 
         cast_down = AOP.Cast(source_tensor.dtype)
         cast_down_inputs = [rewritten.vars[old_output]]
         cast_down_outputs = cast_down.type_transfer(cast_down_inputs)
-        cast_down_constraints = cast_down.checked_requires(cast_down_inputs)
-        if len(cast_down_outputs) != 1:
-            return None
         if (
-            list(cast_down_outputs[0].shape) != list(original_output.shape)
+            len(cast_down_outputs) != 1
+            or list(cast_down_outputs[0].shape) != list(original_output.shape)
             or cast_down_outputs[0].dtype != original_output.dtype
         ):
             return None
-        if any(not bool(constraint) for constraint in cast_down_constraints):
+        if any(not bool(c) for c in cast_down.checked_requires(cast_down_inputs)):
             return None
         cast_down.bind_input_like(cast_down_inputs)
         cast_down.bind_output_like(cast_down_outputs)
         cast_down_inst = rewritten.add_inst(InstExpr(cast_down, (old_output,)))
-
-        for user in old_users:
+        for old_user in old_users:
+            user = rewritten.find_inst_by_id(old_user.identifier)
+            if user is None:
+                return None
             for arg_idx, arg in enumerate(list(user.iexpr.args)):
                 if arg == old_output:
                     user.iexpr.args = list(user.iexpr.args)
-                    rewritten.replace_arg(
-                        user, arg_idx, cast_down_inst.retval(), type_check=False
-                    )
+                    rewritten.replace_arg(user, arg_idx, cast_down_inst.retval(), type_check=False)
                     user.iexpr.args = tuple(user.iexpr.args)
         rewritten.assert_wellform()
         return rewritten
@@ -299,6 +537,12 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                     widened = _rewrite_byte_argreduce_with_int64(working, inst_idx)
                     if widened is not None:
                         candidate_rewrites.append(widened)
+                elif pattern.id == 'pt-inductor-int16-argminmax':
+                    widened_argreduce = _rewrite_int16_argreduce_after_safe_producer(
+                        working, inst_idx
+                    )
+                    if widened_argreduce is not None:
+                        candidate_rewrites.append(widened_argreduce)
                 elif pattern.id == 'pt-inductor-int-clip-minmax':
                     widened_clip = _rewrite_abs_neg_squeeze_clip_with_int64(working, inst_idx)
                     if widened_clip is not None:

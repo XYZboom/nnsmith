@@ -307,14 +307,71 @@ class FuzzingLoop:
             matched_occurrences = self.dedup_matcher.match_occurrences(ir)
             if matched_occurrences:
                 from nnsmith.dedup.rewrite import rewrite_gir
+                from nnsmith.gir import InstIR
 
                 pattern_counts = {}
+                argreduce_input_producers = {}
+                argreduce_input_context = {}
                 initial_occurrence_keys = set()
                 for pattern, nodes in matched_occurrences:
                     pattern_counts[pattern.id] = pattern_counts.get(pattern.id, 0) + 1
                     initial_occurrence_keys.add(
                         (pattern.id, tuple(node.get('inst_id') for node in nodes))
                     )
+                    if pattern.id == 'pt-inductor-int16-argminmax':
+                        for node in nodes:
+                            inst_id = node.get('inst_id')
+                            inst = ir.find_inst_by_id(inst_id)
+                            if (
+                                inst is None
+                                or type(inst.iexpr.op).__name__ not in ('ArgMin', 'ArgMax')
+                                or len(inst.iexpr.args) != 1
+                            ):
+                                continue
+                            producer_id, _ = InstIR.var_inst_idx(inst.iexpr.args[0])
+                            producer = ir.find_inst_by_id(producer_id)
+                            producer_name = (
+                                type(producer.iexpr.op).__name__ if producer is not None else None
+                            )
+                            argreduce_input_producers[str(inst_id)] = producer_name
+                            source_tensor = ir.vars.get(inst.iexpr.args[0])
+                            reduce_dim = inst.iexpr.op.extra_attrs.get('reduce_dim')
+                            axis_len = None
+                            if source_tensor is not None:
+                                try:
+                                    axis = int(reduce_dim)
+                                    if axis < 0:
+                                        axis += len(source_tensor.shape)
+                                    if 0 <= axis < len(source_tensor.shape):
+                                        axis_len = str(source_tensor.shape[axis])
+                                except (TypeError, ValueError):
+                                    pass
+                            producer_chain = []
+                            chain_inst = producer
+                            for _ in range(6):
+                                if chain_inst is None:
+                                    break
+                                chain_op = type(chain_inst.iexpr.op).__name__
+                                output_tensor = (
+                                    ir.vars.get(chain_inst.retval()) if chain_inst.n_output() else None
+                                )
+                                producer_chain.append({
+                                    'op': chain_op,
+                                    'dtype': str(output_tensor.dtype) if output_tensor is not None else None,
+                                })
+                                if chain_op in ('Input', 'Constant') or len(chain_inst.iexpr.args) != 1:
+                                    break
+                                parent_id, _ = InstIR.var_inst_idx(chain_inst.iexpr.args[0])
+                                chain_inst = ir.find_inst_by_id(parent_id)
+                            argreduce_input_context[str(inst_id)] = {
+                                'producer': producer_name,
+                                'producer_chain': producer_chain,
+                                'dtype': str(source_tensor.dtype) if source_tensor is not None else None,
+                                'shape': [str(dim) for dim in source_tensor.shape]
+                                if source_tensor is not None else None,
+                                'reduce_dim': str(reduce_dim),
+                                'axis_len': axis_len,
+                            }
                 original_op_by_id = {
                     inst.identifier: type(inst.iexpr.op).__name__ for inst in ir.insts
                 }
@@ -342,6 +399,8 @@ class FuzzingLoop:
                     FUZZ_LOG.warning(
                         f"Local pre-dedup: seed {seed} pattern_matches="
                         f"{json.dumps(pattern_counts, sort_keys=True)} rewrite=failed; "
+                        f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
+                        f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
                         "original GIR retained"
                     )
                 else:
@@ -364,6 +423,8 @@ class FuzzingLoop:
                         f"remaining_pattern_matches={json.dumps(residual_counts, sort_keys=True)}; "
                         f"rewritten_ops={json.dumps(rewritten_ops, sort_keys=True)}; "
                         f"inserted_ops={json.dumps(inserted_ops, sort_keys=True)}; "
+                        f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
+                        f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
                         "same seed and original GIR, local rewrite only"
                     )
 
