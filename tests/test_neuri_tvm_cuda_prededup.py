@@ -921,6 +921,89 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
             rewritten_output = SymbolNet(rewritten)(x)[0]
             self.assertTrue(torch.equal(original_output, rewritten_output))
 
+    def test_int_squeeze_clip_rewrite_widens_and_preserves_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        gir = GraphIR()
+        input_op = AOP.Input(3)
+        input_op.abs_tensor = AbsTensor([4, 1, 7], DType.int16)
+        source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+        squeeze_op = AOP.Squeeze()
+        squeeze_op.extra_attrs['reduce_dim'] = 1
+        squeeze_inputs = [gir.vars[source]]
+        squeeze_outputs = squeeze_op.type_transfer(squeeze_inputs)
+        squeeze_op.bind_input_like(squeeze_inputs)
+        squeeze_op.bind_output_like(squeeze_outputs)
+        squeeze_inst = gir.add_inst(InstExpr(squeeze_op, (source,)))
+        clip_op = AOP.Clip()
+        clip_inputs = [gir.vars[squeeze_inst.retval()]]
+        clip_outputs = clip_op.type_transfer(clip_inputs)
+        clip_op.bind_input_like(clip_inputs)
+        clip_op.bind_output_like(clip_outputs)
+        gir.add_inst(InstExpr(clip_op, (squeeze_inst.retval(),)))
+        gir.assert_wellform()
+
+        rewritten = rewrite_gir(gir, matcher)
+        self.assertIsNotNone(rewritten)
+        assert rewritten is not None
+        rewritten.assert_wellform()
+        self.assertEqual(
+            [type(inst.iexpr.op).__name__ for inst in rewritten.insts],
+            ['Input', 'Squeeze', 'CastI64', 'Clip', 'Cast'],
+        )
+        x = torch.tensor(
+            [-32768, -2, -1, 0, 1, 2, 32767] * 4, dtype=torch.int16
+        ).reshape(4, 1, 7)
+        self.assertTrue(torch.equal(SymbolNet(gir)(x)[0], SymbolNet(rewritten)(x)[0]))
+
+    def test_int_clip_rewrite_rejects_unvalidated_producer(self):
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        gir = GraphIR()
+        input_op = AOP.Input(2)
+        input_op.abs_tensor = AbsTensor([4, 7], DType.int16)
+        source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+        neg_op = AOP.Neg()
+        neg_inputs = [gir.vars[source]]
+        neg_outputs = neg_op.type_transfer(neg_inputs)
+        neg_op.bind_input_like(neg_inputs)
+        neg_op.bind_output_like(neg_outputs)
+        neg_inst = gir.add_inst(InstExpr(neg_op, (source,)))
+        clip_op = AOP.Clip()
+        clip_inputs = [gir.vars[neg_inst.retval()]]
+        clip_outputs = clip_op.type_transfer(clip_inputs)
+        clip_op.bind_input_like(clip_inputs)
+        clip_op.bind_output_like(clip_outputs)
+        gir.add_inst(InstExpr(clip_op, (neg_inst.retval(),)))
+        gir.assert_wellform()
+
+        self.assertIsNone(rewrite_gir(gir, matcher))
+        self.assertEqual(
+            [type(inst.iexpr.op).__name__ for inst in gir.insts], ['Input', 'Neg', 'Clip']
+        )
+        gir.assert_wellform()
+
     def test_int_minmax_excludes_identical_inputs(self):
         pattern = PatternDef(
             id='var-ne-capability',

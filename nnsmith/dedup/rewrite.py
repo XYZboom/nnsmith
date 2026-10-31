@@ -169,8 +169,8 @@ def _rewrite_byte_argreduce_with_int64(gir, idx):
         return None
 
 
-def _rewrite_int_abs_clip_with_int64(gir, idx):
-    """Widen an Abs->Clip boundary to avoid int8 C++ promotion mismatch."""
+def _rewrite_abs_squeeze_clip_with_int64(gir, idx):
+    """Widen an Abs/Squeeze->Clip boundary for narrow integer inputs."""
     inst = gir.insts[idx]
     if type(inst.iexpr.op).__name__ != 'Clip' or len(inst.iexpr.args) != 1:
         return None
@@ -180,7 +180,7 @@ def _rewrite_int_abs_clip_with_int64(gir, idx):
         return None
     producer_id, _ = InstIR.var_inst_idx(source)
     producer = gir.find_inst_by_id(producer_id)
-    if producer is None or type(producer.iexpr.op).__name__ != 'Abs':
+    if producer is None or type(producer.iexpr.op).__name__ not in ('Abs', 'Squeeze'):
         return None
 
     original_output = gir.vars.get(inst.retval())
@@ -297,7 +297,7 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                     if widened is not None:
                         candidate_rewrites.append(widened)
                 elif pattern.id == 'pt-inductor-int-clip-minmax':
-                    widened_clip = _rewrite_int_abs_clip_with_int64(working, inst_idx)
+                    widened_clip = _rewrite_abs_squeeze_clip_with_int64(working, inst_idx)
                     if widened_clip is not None:
                         candidate_rewrites.append(widened_clip)
                 candidate_rewrites.extend(
