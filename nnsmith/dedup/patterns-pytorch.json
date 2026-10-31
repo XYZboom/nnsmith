@@ -506,6 +506,44 @@
       ]
     },
     {
+      "id": "pt-inductor-int16-abs-where-reduce-max-true-arm",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 ReduceMax overload failure when Abs is the true Where arm",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "WHERE", "inputs": ["v_cond", "v_abs", "v_other"], "outputs": ["v_where"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": "REDUCE_MAX", "inputs": ["v_where"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_where", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 1},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-abs-where-squeeze-reduce-min-false-arm",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 ReduceMin overload failure when Abs is the false Where arm before Squeeze",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "WHERE", "inputs": ["v_cond", "v_other", "v_abs"], "outputs": ["v_where"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": "SQUEEZE", "inputs": ["v_where"], "outputs": ["v_sq"], "attrs": {}},
+        {"match": "node", "id": "n3", "op": "REDUCE_MIN", "inputs": ["v_sq"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_sq", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 2},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
+        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 0}
+      ]
+    },
+    {
       "id": "pt-inductor-int8-abs-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",

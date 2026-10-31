@@ -918,6 +918,112 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                             msg=f'expected={expected}, compiled={compiled_output}',
                         )
 
+    def test_int16_abs_where_reduce_patterns_preserve_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup import DedupMatcher
+        from nnsmith.dedup.rewrite import rewrite_gir
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        cases = (
+            ('true_arm', 'pt-inductor-int16-abs-where-reduce-max-true-arm', [2, 2]),
+            ('false_arm_squeeze', 'pt-inductor-int16-abs-where-squeeze-reduce-min-false-arm', [1, 2]),
+        )
+        for case, pattern_id, input_shape in cases:
+            with self.subTest(case=case):
+                condition = torch.tensor([[True, False], [False, True]], dtype=torch.bool)
+                x = torch.tensor([[-32768, -5], [7, 32767]], dtype=torch.int16)
+                other = torch.tensor([[5, -7], [-1, 9]], dtype=torch.int16)
+                if case == 'false_arm_squeeze':
+                    condition = condition[:1]
+                    x = x[:1]
+                    other = other[:1]
+                gir = GraphIR()
+
+                def add_input(shape, dtype):
+                    input_op = AOP.Input(len(shape))
+                    input_op.abs_tensor = AbsTensor(shape, dtype)
+                    return gir.add_inst(
+                        InstExpr(input_op, cast(tuple[str], ()))
+                    ).retval()
+
+                cond_var = add_input(input_shape, DType.bool)
+                source = add_input(input_shape, DType.int16)
+                other_var = add_input(input_shape, DType.int16)
+                abs_op = AOP.Abs()
+                abs_inputs = [gir.vars[source]]
+                abs_outputs = abs_op.type_transfer(abs_inputs)
+                abs_op.bind_input_like(abs_inputs)
+                abs_op.bind_output_like(abs_outputs)
+                abs_var = gir.add_inst(InstExpr(abs_op, (source,))).retval()
+
+                where_op = AOP.Where()
+                where_args = (
+                    (cond_var, abs_var, other_var)
+                    if case == 'true_arm'
+                    else (cond_var, other_var, abs_var)
+                )
+                where_inputs = [gir.vars[key] for key in where_args]
+                where_outputs = where_op.type_transfer(where_inputs)
+                where_op.bind_input_like(where_inputs)
+                where_op.bind_output_like(where_outputs)
+                source = gir.add_inst(
+                    InstExpr(where_op, cast(tuple[str, ...], where_args))  # type: ignore[arg-type]
+                ).retval()
+
+                if case == 'false_arm_squeeze':
+                    squeeze = AOP.Squeeze()
+                    squeeze.extra_attrs['reduce_dim'] = 0
+                    squeeze_inputs = [gir.vars[source]]
+                    squeeze_outputs = squeeze.type_transfer(squeeze_inputs)
+                    squeeze.bind_input_like(squeeze_inputs)
+                    squeeze.bind_output_like(squeeze_outputs)
+                    source = gir.add_inst(InstExpr(squeeze, (source,))).retval()
+                    reduce_op = AOP.ReduceMin()
+                else:
+                    reduce_op = AOP.ReduceMax()
+                reduce_op.extra_attrs['reduce_dim'] = 0
+                reduce_inputs = [gir.vars[source]]
+                reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+                reduce_op.bind_input_like(reduce_inputs)
+                reduce_op.bind_output_like(reduce_outputs)
+                reduce_inst = gir.add_inst(InstExpr(reduce_op, (source,)))
+                gir.assert_wellform()
+
+                self.assertIn(pattern_id, {p.id for p, _ in matcher.match_occurrences(gir)})
+                rewritten = rewrite_gir(gir, matcher)
+                self.assertIsNotNone(rewritten)
+                assert rewritten is not None
+                rewritten.assert_wellform()
+                rewritten_reduce = rewritten.find_inst_by_id(reduce_inst.identifier)
+                assert rewritten_reduce is not None
+                self.assertEqual(
+                    rewritten.vars[rewritten_reduce.iexpr.args[0]].dtype, DType.int64
+                )
+                expected = SymbolNet(gir)(other, x, condition)[0]
+                self.assertTrue(
+                    torch.equal(expected, SymbolNet(rewritten)(other, x, condition)[0])
+                )
+                torch._dynamo.reset()
+                with _patch_symbolnet_debug_helpers():
+                    compiled = torch.compile(
+                        SymbolNet(rewritten), backend='inductor', fullgraph=True
+                    )
+                    self.assertTrue(
+                        torch.equal(expected, compiled(other, x, condition)[0])
+                    )
+                torch._dynamo.reset()
+
     def test_int16_extended_abs_reduce_patterns_preserve_semantics(self):
         import torch
 

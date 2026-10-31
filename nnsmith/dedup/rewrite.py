@@ -551,6 +551,23 @@ def _widen_narrow_unary_preserving_wrap(gir, inst_id):
         return False
 
 
+def _rewrite_where_abs_before_reduce(gir, reduce_idx, abs_inst_id):
+    """Restore an Abs branch's narrow dtype before widening a downstream reduction."""
+    if reduce_idx < 0 or reduce_idx >= len(gir.insts):
+        return None
+    reduce_inst_id = gir.insts[reduce_idx].identifier
+    rewritten = copy.deepcopy(gir)
+    if not _widen_narrow_unary_preserving_wrap(rewritten, abs_inst_id):
+        return None
+    rewritten_idx = next(
+        (idx for idx, inst in enumerate(rewritten.insts) if inst.identifier == reduce_inst_id),
+        None,
+    )
+    if rewritten_idx is None:
+        return None
+    return _rewrite_narrow_reduce_minmax_with_int64(rewritten, rewritten_idx)
+
+
 def _rewrite_int16_argreduce_after_safe_producer(gir, idx):
     """Widen only after preserving every int16 wrap in the ArgMin/ArgMax input path."""
     inst = gir.insts[idx]
@@ -794,6 +811,17 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                     widened = _rewrite_byte_argreduce_with_int64(working, inst_idx)
                     if widened is not None:
                         candidate_rewrites.append(widened)
+                elif pattern.id in (
+                    'pt-inductor-int16-abs-where-reduce-max-true-arm',
+                    'pt-inductor-int16-abs-where-squeeze-reduce-min-false-arm',
+                ):
+                    abs_inst_id = matched_nodes[0].get('inst_id')
+                    if abs_inst_id is not None:
+                        widened_reduce = _rewrite_where_abs_before_reduce(
+                            working, inst_idx, abs_inst_id
+                        )
+                        if widened_reduce is not None:
+                            candidate_rewrites.append(widened_reduce)
                 elif pattern.id in (
                     'pt-inductor-int8-abs-reduce-minmax',
                     'pt-inductor-int8-abs-flatten-reduce-minmax',
