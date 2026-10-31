@@ -388,6 +388,195 @@
       ]
     },
     {
+      "id": "pt-inductor-int16-abs-slice-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 min/max propagation overload failure after Abs and Slice",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ABS",
+          "inputs": ["v_in"],
+          "outputs": ["v_abs"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "SLICE",
+          "inputs": ["v_abs"],
+          "outputs": ["v_slice"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]},
+          "inputs": ["v_slice"],
+          "outputs": ["v_out"],
+          "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [
+        {"match": "value", "id": "v_slice", "dtype": {"$eq": "int16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-abs-transpose-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 min/max propagation overload failure through Abs and Transpose",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "TRANSPOSE", "inputs": ["v_abs"], "outputs": ["v_trans"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]}, "inputs": ["v_trans"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_trans", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-double-abs-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 min/max propagation overload failure after consecutive Abs operations",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs0"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "ABS", "inputs": ["v_abs0"], "outputs": ["v_abs1"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]}, "inputs": ["v_abs1"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 1}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_abs1", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-abs-squeeze-squeeze-neg-reduce-min",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 ReduceMin overload failure after Abs, two Squeeze operations, and Neg",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "SQUEEZE", "inputs": ["v_abs"], "outputs": ["v_sq0"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": "SQUEEZE", "inputs": ["v_sq0"], "outputs": ["v_sq1"], "attrs": {}},
+        {"match": "node", "id": "n3", "op": "NEG", "inputs": ["v_sq1"], "outputs": ["v_neg"], "attrs": {}},
+        {"match": "node", "id": "n4", "op": "REDUCE_MIN", "inputs": ["v_neg"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_neg", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
+        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 0},
+        {"fromNode": "n3", "fromOutput": 0, "toNode": "n4", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-abs-squeeze-expand-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 min/max propagation overload failure through Abs, Squeeze, and Expand",
+      "severity": "crash",
+      "nodes": [
+        {"match": "node", "id": "n0", "op": "ABS", "inputs": ["v_in"], "outputs": ["v_abs"], "attrs": {}},
+        {"match": "node", "id": "n1", "op": "SQUEEZE", "inputs": ["v_abs"], "outputs": ["v_sq"], "attrs": {}},
+        {"match": "node", "id": "n2", "op": "EXPAND", "inputs": ["v_sq"], "outputs": ["v_exp"], "attrs": {}},
+        {"match": "node", "id": "n3", "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]}, "inputs": ["v_exp"], "outputs": ["v_out"], "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [{"match": "value", "id": "v_exp", "dtype": {"$eq": "int16"}}],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0},
+        {"fromNode": "n2", "fromOutput": 0, "toNode": "n3", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int8-abs-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int8 min/max propagation overload failure after Abs",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ABS",
+          "inputs": ["v_in"],
+          "outputs": ["v_abs"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]},
+          "inputs": ["v_abs"],
+          "outputs": ["v_out"],
+          "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [
+        {"match": "value", "id": "v_abs", "dtype": {"$eq": "int8"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int8-abs-flatten-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int8 min/max propagation overload failure after Abs and Flatten",
+      "severity": "crash",
+      "nodes": [
+        {
+          "match": "node",
+          "id": "n0",
+          "op": "ABS",
+          "inputs": ["v_in"],
+          "outputs": ["v_abs"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "FLATTEN",
+          "inputs": ["v_abs"],
+          "outputs": ["v_flat"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]},
+          "inputs": ["v_flat"],
+          "outputs": ["v_out"],
+          "attrs": {"axis_len": {"$gte": 2}}
+        }
+      ],
+      "values": [
+        {"match": "value", "id": "v_flat", "dtype": {"$eq": "int8"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
+      ]
+    },
+    {
       "id": "pt-inductor-fp16-softmax-squeeze-reduce-max-duplicate-decl",
       "compiler": "pytorch",
       "target": "cpu",

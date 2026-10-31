@@ -57,6 +57,49 @@ def _rewrite_state(gir):
     )
 
 
+def _has_abs_input_ancestor(gir, inst, max_depth=4):
+    """Find Abs on a bounded value path, including Where's selected-value arms."""
+    pending = [(arg, 0) for arg in inst.iexpr.args]
+    visited = set()
+    while pending:
+        var, depth = pending.pop()
+        if depth >= max_depth:
+            continue
+        producer_id, _ = InstIR.var_inst_idx(var)
+        if producer_id in visited:
+            continue
+        visited.add(producer_id)
+        producer = gir.find_inst_by_id(producer_id)
+        if producer is None:
+            continue
+        op_name = type(producer.iexpr.op).__name__
+        if op_name == 'Abs':
+            return True
+        args = producer.iexpr.args
+        if len(args) == 1:
+            pending.append((args[0], depth + 1))
+        elif op_name == 'Where' and len(args) == 3:
+            # The first Where input is a predicate, not a value contributor.
+            # Only the selected data arms can carry Abs into this value.
+            pending.extend((parent, depth + 1) for parent in args[1:])
+    return False
+
+
+def _has_direct_int16_neg_input_clip(gir, inst):
+    if type(inst.iexpr.op).__name__ != 'Clip' or len(inst.iexpr.args) != 1:
+        return False
+    source_tensor = gir.vars.get(inst.iexpr.args[0])
+    if source_tensor is None or source_tensor.dtype != DType.int16:
+        return False
+    neg_id, _ = InstIR.var_inst_idx(inst.iexpr.args[0])
+    neg = gir.find_inst_by_id(neg_id)
+    if neg is None or type(neg.iexpr.op).__name__ != 'Neg' or len(neg.iexpr.args) != 1:
+        return False
+    parent_id, _ = InstIR.var_inst_idx(neg.iexpr.args[0])
+    parent = gir.find_inst_by_id(parent_id)
+    return parent is not None and type(parent.iexpr.op).__name__ == 'Input'
+
+
 def _rewrite_inst(gir, idx, cand_name):
     inst = gir.insts[idx]
     Cand = getattr(AOP, cand_name, None)
@@ -169,7 +212,99 @@ def _rewrite_byte_argreduce_with_int64(gir, idx):
         return None
 
 
-def _rewrite_narrow_reduce_minmax_with_int64(gir, idx):
+def _rewrite_narrow_binary_minmax_with_int64(gir, idx):
+    """Widen narrow integer Min/Max operands, preserving the operation semantics."""
+    inst = gir.insts[idx]
+    op_name = type(inst.iexpr.op).__name__
+    if op_name not in ('Min', 'Max') or len(inst.iexpr.args) != 2 or inst.n_output() != 1:
+        return None
+    input_vars = list(inst.iexpr.args)
+    input_tensors = [gir.vars.get(var) for var in input_vars]
+    if any(tensor is None for tensor in input_tensors):
+        return None
+    dtype = input_tensors[0].dtype
+    if dtype not in (DType.int8, DType.int16) or any(tensor.dtype != dtype for tensor in input_tensors):
+        return None
+    original_output = gir.vars.get(inst.retval())
+    if original_output is None or original_output.dtype != dtype:
+        return None
+    old_users = list(inst.users[0])
+
+    try:
+        rewritten = copy.deepcopy(gir)
+        rewritten_inst = rewritten.find_inst_by_id(inst.identifier)
+        if rewritten_inst is None:
+            return None
+        widened_vars = []
+        widened_inputs = []
+        for arg in input_vars:
+            source_tensor = rewritten.vars.get(arg)
+            if source_tensor is None or source_tensor.dtype != dtype:
+                return None
+            cast_up = AOP.CastI64()
+            cast_inputs = [AbsTensor(list(source_tensor.shape), source_tensor.dtype)]
+            cast_outputs = cast_up.type_transfer(cast_inputs)
+            if len(cast_outputs) != 1 or cast_outputs[0].dtype != DType.int64:
+                return None
+            if any(not bool(c) for c in cast_up.checked_requires(cast_inputs)):
+                return None
+            cast_up.bind_input_like(cast_inputs)
+            cast_up.bind_output_like(cast_outputs)
+            cast_inst = rewritten.add_inst(InstExpr(cast_up, (arg,)))
+            widened_vars.append(cast_inst.retval())
+            widened_inputs.append(cast_outputs[0])
+
+        wide_op = copy.deepcopy(rewritten_inst.iexpr.op)
+        wide_outputs = wide_op.type_transfer(widened_inputs)
+        if (
+            len(wide_outputs) != 1
+            or list(wide_outputs[0].shape) != list(original_output.shape)
+            or wide_outputs[0].dtype != DType.int64
+        ):
+            return None
+        if any(not bool(c) for c in wide_op.checked_requires(widened_inputs)):
+            return None
+        wide_op.bind_input_like(widened_inputs)
+        wide_op.bind_output_like(wide_outputs)
+
+        rewritten_inst.iexpr.args = list(rewritten_inst.iexpr.args)
+        for arg_idx, widened_var in enumerate(widened_vars):
+            rewritten.replace_arg(rewritten_inst, arg_idx, widened_var, type_check=False)
+        rewritten_inst.iexpr.args = tuple(rewritten_inst.iexpr.args)
+        rewritten_inst.iexpr.op = wide_op
+        old_output = rewritten_inst.retval()
+        rewritten.vars[old_output] = AbsTensor(list(wide_outputs[0].shape), DType.int64)
+
+        cast_down = AOP.Cast(dtype)
+        cast_down_inputs = [rewritten.vars[old_output]]
+        cast_down_outputs = cast_down.type_transfer(cast_down_inputs)
+        if (
+            len(cast_down_outputs) != 1
+            or list(cast_down_outputs[0].shape) != list(original_output.shape)
+            or cast_down_outputs[0].dtype != dtype
+        ):
+            return None
+        if any(not bool(c) for c in cast_down.checked_requires(cast_down_inputs)):
+            return None
+        cast_down.bind_input_like(cast_down_inputs)
+        cast_down.bind_output_like(cast_down_outputs)
+        cast_down_inst = rewritten.add_inst(InstExpr(cast_down, (old_output,)))
+        for old_user in old_users:
+            user = rewritten.find_inst_by_id(old_user.identifier)
+            if user is None:
+                return None
+            for arg_idx, arg in enumerate(list(user.iexpr.args)):
+                if arg == old_output:
+                    user.iexpr.args = list(user.iexpr.args)
+                    rewritten.replace_arg(user, arg_idx, cast_down_inst.retval(), type_check=False)
+                    user.iexpr.args = tuple(user.iexpr.args)
+        rewritten.assert_wellform()
+        return rewritten
+    except Exception:
+        return None
+
+
+def _rewrite_narrow_reduce_minmax_with_int64(gir, idx, min_axis_len=2):
     """Widen a narrow ReduceMin/ReduceMax input and cast its result back exactly."""
     inst = gir.insts[idx]
     if type(inst.iexpr.op).__name__ not in ('ReduceMin', 'ReduceMax') or len(inst.iexpr.args) != 1:
@@ -185,7 +320,11 @@ def _rewrite_narrow_reduce_minmax_with_int64(gir, idx):
         axis = int(reduce_dim)
         if axis < 0:
             axis += len(source_tensor.shape)
-        if axis < 0 or axis >= len(source_tensor.shape) or int(source_tensor.shape[axis]) < 2:
+        if (
+            axis < 0
+            or axis >= len(source_tensor.shape)
+            or int(source_tensor.shape[axis]) < min_axis_len
+        ):
             return None
     except (TypeError, ValueError):
         return None
@@ -278,7 +417,10 @@ def _rewrite_narrow_reduce_minmax_with_int64(gir, idx):
 
 def _collect_narrow_unary_nodes(gir, value, dtype):
     """Return promotion-sensitive unary IDs on a safe single-input ancestor path."""
-    view_ops = {'Concat1', 'Slice', 'Reshape', 'Transpose', 'Squeeze', 'Flatten'}
+    view_ops = {
+        'Concat1', 'Slice', 'Reshape', 'Transpose', 'Squeeze', 'Flatten',
+        'Expand', 'ExpandLast1', 'ExpandLast2', 'ExpandLast3', 'ExpandLast4',
+    }
     unary_ids = []
     visited = set()
     has_narrowing_cast = False
@@ -639,16 +781,38 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                 if inst_idx is None:
                     continue
                 op_name = type(working.insts[inst_idx].iexpr.op).__name__
+                if pattern.id == 'pt-inductor-int-clip-minmax':
+                    matched_inst = working.insts[inst_idx]
+                    has_abs = _has_abs_input_ancestor(working, matched_inst)
+                    has_validated_direct_clip = _has_direct_int16_neg_input_clip(
+                        working, matched_inst
+                    )
+                    if not has_abs and not has_validated_direct_clip:
+                        continue
                 candidate_rewrites = []
                 if pattern.id == 'pt-inductor-cpu-byte-argreduce-tie':
                     widened = _rewrite_byte_argreduce_with_int64(working, inst_idx)
                     if widened is not None:
                         candidate_rewrites.append(widened)
                 elif pattern.id in (
+                    'pt-inductor-int8-abs-reduce-minmax',
+                    'pt-inductor-int8-abs-flatten-reduce-minmax',
                     'pt-inductor-int16-abs-reduce-minmax',
                     'pt-inductor-int16-abs-squeeze-reduce-minmax',
+                    'pt-inductor-int16-abs-slice-reduce-minmax',
+                    'pt-inductor-int16-abs-transpose-reduce-minmax',
+                    'pt-inductor-int16-double-abs-reduce-minmax',
+                    'pt-inductor-int16-abs-squeeze-squeeze-neg-reduce-min',
+                    'pt-inductor-int16-abs-squeeze-expand-reduce-minmax',
                 ):
-                    widened_reduce = _rewrite_narrow_reduce_minmax_with_int64(working, inst_idx)
+                    min_axis_len = (
+                        1
+                        if pattern.id == 'pt-inductor-int16-double-abs-reduce-minmax'
+                        else 2
+                    )
+                    widened_reduce = _rewrite_narrow_reduce_minmax_with_int64(
+                        working, inst_idx, min_axis_len=min_axis_len
+                    )
                     if widened_reduce is not None:
                         candidate_rewrites.append(widened_reduce)
                 elif pattern.id == 'pt-inductor-int16-argminmax':
@@ -658,13 +822,23 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                     if widened_argreduce is not None:
                         candidate_rewrites.append(widened_argreduce)
                 elif pattern.id == 'pt-inductor-int-clip-minmax':
-                    widened_clip = _rewrite_abs_neg_squeeze_clip_with_int64(working, inst_idx)
-                    if widened_clip is not None:
-                        candidate_rewrites.append(widened_clip)
-                candidate_rewrites.extend(
-                    _rewrite_inst(working, inst_idx, candidate_name)
-                    for candidate_name in _candidates_for(op_name)[:max_candidates]
-                )
+                    if op_name in ('Min', 'Max'):
+                        widened_minmax = _rewrite_narrow_binary_minmax_with_int64(
+                            working, inst_idx
+                        )
+                        if widened_minmax is not None:
+                            candidate_rewrites.append(widened_minmax)
+                    elif op_name == 'Clip':
+                        widened_clip = _rewrite_abs_neg_squeeze_clip_with_int64(
+                            working, inst_idx
+                        )
+                        if widened_clip is not None:
+                            candidate_rewrites.append(widened_clip)
+                if pattern.id != 'pt-inductor-int-clip-minmax':
+                    candidate_rewrites.extend(
+                        _rewrite_inst(working, inst_idx, candidate_name)
+                        for candidate_name in _candidates_for(op_name)[:max_candidates]
+                    )
                 for rewritten in candidate_rewrites:
                     if rewritten is None:
                         continue

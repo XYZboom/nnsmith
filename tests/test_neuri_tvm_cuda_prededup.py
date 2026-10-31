@@ -69,6 +69,7 @@ class TestNeuriTvmCudaPrededup(unittest.TestCase):
         self.assertIn('original GIR retained', make_testcase_source)
         self.assertIn('rewritten_occurrence_keys', make_testcase_source)
         self.assertIn('reduce_input_context', make_testcase_source)
+        self.assertIn('clip_minmax_context', make_testcase_source)
         self.assertNotIn('dedup_matcher=self.dedup_matcher', generator_source)
         self.assertNotIn('resampled without seed change', make_testcase_source)
 
@@ -917,6 +918,240 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
                             msg=f'expected={expected}, compiled={compiled_output}',
                         )
 
+    def test_int16_extended_abs_reduce_patterns_preserve_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup import DedupMatcher
+        from nnsmith.dedup.rewrite import rewrite_gir
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        cases = (
+            ('transpose', 'pt-inductor-int16-abs-transpose-reduce-minmax', [2, 4], AOP.ReduceMax),
+            ('double_abs', 'pt-inductor-int16-double-abs-reduce-minmax', [2, 4], AOP.ReduceMin),
+            ('double_abs_singleton', 'pt-inductor-int16-double-abs-reduce-minmax', [2, 1], AOP.ReduceMin),
+            ('squeeze_neg', 'pt-inductor-int16-abs-squeeze-squeeze-neg-reduce-min', [2, 1, 1, 4], AOP.ReduceMin),
+            ('expand', 'pt-inductor-int16-abs-squeeze-expand-reduce-minmax', [1, 2, 4], AOP.ReduceMax),
+        )
+        base = torch.tensor([[-32768, -5, 5, 1], [7, -7, 0, 32767]], dtype=torch.int16)
+        for case, pattern_id, input_shape, reduce_cls in cases:
+            with self.subTest(case=case):
+                x = base[:, :1] if case == 'double_abs_singleton' else base.reshape(input_shape)
+                gir = GraphIR()
+                input_op = AOP.Input(len(input_shape))
+                input_op.abs_tensor = AbsTensor(input_shape, DType.int16)
+                source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+
+                def add_unary(op, source_var):
+                    inputs = [gir.vars[source_var]]
+                    outputs = op.type_transfer(inputs)
+                    op.bind_input_like(inputs)
+                    op.bind_output_like(outputs)
+                    return gir.add_inst(InstExpr(op, (source_var,))).retval()
+
+                source = add_unary(AOP.Abs(), source)
+                if case == 'transpose':
+                    transpose = AOP.Transpose()
+                    transpose.extra_attrs.update({'dim0': 0, 'dim1': 1})
+                    source = add_unary(transpose, source)
+                    reduce_dim = 1
+                elif case.startswith('double_abs'):
+                    source = add_unary(AOP.Abs(), source)
+                    reduce_dim = 1
+                elif case == 'squeeze_neg':
+                    for _ in range(2):
+                        squeeze = AOP.Squeeze()
+                        squeeze.extra_attrs['reduce_dim'] = 1
+                        source = add_unary(squeeze, source)
+                    source = add_unary(AOP.Neg(), source)
+                    reduce_dim = 1
+                else:
+                    squeeze = AOP.Squeeze()
+                    squeeze.extra_attrs['reduce_dim'] = 0
+                    source = add_unary(squeeze, source)
+                    source = add_unary(AOP.ExpandLast4(1), source)
+                    reduce_dim = 3
+
+                reduce_op = reduce_cls()
+                reduce_op.extra_attrs['reduce_dim'] = reduce_dim
+                reduce_inputs = [gir.vars[source]]
+                reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+                reduce_op.bind_input_like(reduce_inputs)
+                reduce_op.bind_output_like(reduce_outputs)
+                reduce_inst = gir.add_inst(InstExpr(reduce_op, (source,)))
+                gir.assert_wellform()
+
+                self.assertIn(pattern_id, {p.id for p, _ in matcher.match_occurrences(gir)})
+                rewritten = rewrite_gir(gir, matcher)
+                self.assertIsNotNone(rewritten)
+                assert rewritten is not None
+                rewritten.assert_wellform()
+                rewritten_reduce = rewritten.find_inst_by_id(reduce_inst.identifier)
+                assert rewritten_reduce is not None
+                self.assertEqual(
+                    rewritten.vars[rewritten_reduce.iexpr.args[0]].dtype, DType.int64
+                )
+                expected = SymbolNet(gir)(x)[0]
+                self.assertTrue(torch.equal(expected, SymbolNet(rewritten)(x)[0]))
+                torch._dynamo.reset()
+                with _patch_symbolnet_debug_helpers():
+                    compiled = torch.compile(
+                        SymbolNet(rewritten), backend='inductor', fullgraph=True
+                    )
+                    self.assertTrue(torch.equal(expected, compiled(x)[0]))
+                torch._dynamo.reset()
+
+    def test_int16_abs_slice_reduce_minmax_preserves_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup import DedupMatcher
+        from nnsmith.dedup.rewrite import rewrite_gir
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        x = torch.tensor(
+            [[-32768, -5, 5, 1, 7], [7, -7, 0, 32767, -2]], dtype=torch.int16
+        )
+        for reduce_cls in (AOP.ReduceMin, AOP.ReduceMax):
+            with self.subTest(op=reduce_cls.__name__):
+                gir = GraphIR()
+                input_op = AOP.Input(2)
+                input_op.abs_tensor = AbsTensor([2, 5], DType.int16)
+                source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+
+                abs_op = AOP.Abs()
+                abs_inputs = [gir.vars[source]]
+                abs_outputs = abs_op.type_transfer(abs_inputs)
+                abs_op.bind_input_like(abs_inputs)
+                abs_op.bind_output_like(abs_outputs)
+                source = gir.add_inst(InstExpr(abs_op, (source,))).retval()
+
+                slice_op = AOP.Slice(1, 5, 1)
+                slice_op.extra_attrs.update({'ndims': 2, 'axis': 1, 'region': 'mid'})
+                slice_inputs = [gir.vars[source]]
+                slice_outputs = slice_op.type_transfer(slice_inputs)
+                slice_op.bind_input_like(slice_inputs)
+                slice_op.bind_output_like(slice_outputs)
+                source = gir.add_inst(InstExpr(slice_op, (source,))).retval()
+
+                reduce_op = reduce_cls()
+                reduce_op.extra_attrs['reduce_dim'] = 1
+                reduce_inputs = [gir.vars[source]]
+                reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+                reduce_op.bind_input_like(reduce_inputs)
+                reduce_op.bind_output_like(reduce_outputs)
+                reduce_inst = gir.add_inst(InstExpr(reduce_op, (source,)))
+                gir.assert_wellform()
+
+                pattern_id = 'pt-inductor-int16-abs-slice-reduce-minmax'
+                self.assertIn(pattern_id, {p.id for p, _ in matcher.match_occurrences(gir)})
+                rewritten = rewrite_gir(gir, matcher)
+                self.assertIsNotNone(rewritten)
+                assert rewritten is not None
+                rewritten.assert_wellform()
+                rewritten_reduce = rewritten.find_inst_by_id(reduce_inst.identifier)
+                assert rewritten_reduce is not None
+                self.assertEqual(
+                    rewritten.vars[rewritten_reduce.iexpr.args[0]].dtype, DType.int64
+                )
+                expected = SymbolNet(gir)(x)[0]
+                self.assertTrue(torch.equal(expected, SymbolNet(rewritten)(x)[0]))
+                torch._dynamo.reset()
+                with _patch_symbolnet_debug_helpers():
+                    compiled = torch.compile(
+                        SymbolNet(rewritten), backend='inductor', fullgraph=True
+                    )
+                    self.assertTrue(torch.equal(expected, compiled(x)[0]))
+                torch._dynamo.reset()
+
+    def test_int8_abs_reduce_patterns_preserve_narrow_wrap_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup import DedupMatcher
+        from nnsmith.dedup.rewrite import rewrite_gir
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.dialect import Flatten
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        x = torch.tensor([[-128, -5, 5, 1], [7, -7, 0, 127]], dtype=torch.int8)
+        for with_flatten in (False, True):
+            for reduce_cls in (AOP.ReduceMin, AOP.ReduceMax):
+                with self.subTest(with_flatten=with_flatten, op=reduce_cls.__name__):
+                    gir = GraphIR()
+                    input_op = AOP.Input(2)
+                    input_op.abs_tensor = AbsTensor([2, 4], DType.int8)
+                    source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+                    abs_op = AOP.Abs()
+                    abs_inputs = [gir.vars[source]]
+                    abs_outputs = abs_op.type_transfer(abs_inputs)
+                    abs_op.bind_input_like(abs_inputs)
+                    abs_op.bind_output_like(abs_outputs)
+                    source = gir.add_inst(InstExpr(abs_op, (source,))).retval()
+                    if with_flatten:
+                        flatten_op = Flatten()
+                        flatten_inputs = [gir.vars[source]]
+                        flatten_outputs = flatten_op.type_transfer(flatten_inputs)
+                        flatten_op.bind_input_like(flatten_inputs)
+                        flatten_op.bind_output_like(flatten_outputs)
+                        source = gir.add_inst(InstExpr(flatten_op, (source,))).retval()
+                    reduce_op = reduce_cls()
+                    reduce_op.extra_attrs['reduce_dim'] = 0 if with_flatten else 1
+                    reduce_inputs = [gir.vars[source]]
+                    reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+                    reduce_op.bind_input_like(reduce_inputs)
+                    reduce_op.bind_output_like(reduce_outputs)
+                    gir.add_inst(InstExpr(reduce_op, (source,)))
+                    gir.assert_wellform()
+
+                    expected_id = (
+                        'pt-inductor-int8-abs-flatten-reduce-minmax'
+                        if with_flatten
+                        else 'pt-inductor-int8-abs-reduce-minmax'
+                    )
+                    self.assertIn(
+                        expected_id, {p.id for p, _ in matcher.match_occurrences(gir)}
+                    )
+                    rewritten = rewrite_gir(gir, matcher)
+                    self.assertIsNotNone(rewritten)
+                    assert rewritten is not None
+                    rewritten.assert_wellform()
+                    expected = SymbolNet(gir)(x)[0]
+                    self.assertTrue(torch.equal(expected, SymbolNet(rewritten)(x)[0]))
+                    torch._dynamo.reset()
+                    with _patch_symbolnet_debug_helpers():
+                        compiled = torch.compile(
+                            SymbolNet(rewritten), backend='inductor', fullgraph=True
+                        )
+                        self.assertTrue(torch.equal(expected, compiled(x)[0]))
+                    torch._dynamo.reset()
+
     def test_byte_argreduce_pattern_inserts_semantics_preserving_int64_cast(self):
         from typing import cast
 
@@ -1494,6 +1729,144 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         with _patch_symbolnet_debug_helpers():
             compiled = torch.compile(SymbolNet(rewritten), backend='inductor', fullgraph=True)
             self.assertTrue(torch.equal(original, compiled(values)[0]))
+
+    def test_int_minmax_without_abs_ancestor_is_not_rewritten(self):
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        gir = GraphIR()
+        inputs = []
+        for _ in range(2):
+            input_op = AOP.Input(2)
+            input_op.abs_tensor = AbsTensor([3, 5], DType.int16)
+            inputs.append(gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval())
+        min_op = AOP.Min()
+        min_inputs = [gir.vars[var] for var in inputs]
+        min_outputs = min_op.type_transfer(min_inputs)
+        min_op.bind_input_like(min_inputs)
+        min_op.bind_output_like(min_outputs)
+        gir.add_inst(InstExpr(min_op, tuple(inputs)))
+        gir.assert_wellform()
+
+        self.assertIn(
+            'pt-inductor-int-clip-minmax',
+            {pattern.id for pattern, _ in matcher.match_occurrences(gir)},
+        )
+        self.assertIsNone(rewrite_gir(gir, matcher))
+        self.assertEqual(
+            [type(inst.iexpr.op).__name__ for inst in gir.insts],
+            ['Input', 'Input', 'Min'],
+        )
+        gir.assert_wellform()
+
+    def test_abs_ancestor_search_only_crosses_where_value_arms(self):
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup.rewrite import _has_abs_input_ancestor
+        from nnsmith.gir import GraphIR, InstExpr
+
+        def add_op(gir, op, args):
+            inputs = [gir.vars[var] for var in args]
+            outputs = op.type_transfer(inputs)
+            op.bind_input_like(inputs)
+            op.bind_output_like(outputs)
+            return gir.add_inst(InstExpr(op, tuple(args)))
+
+        def add_input(gir, dtype):
+            op = AOP.Input(2)
+            op.abs_tensor = AbsTensor([3, 5], dtype)
+            return gir.add_inst(InstExpr(op, cast(tuple[str], ()))).retval()
+
+        # Abs in either selected Where data arm is a genuine value ancestor.
+        gir = GraphIR()
+        cond, source, other = (add_input(gir, DType.bool), add_input(gir, DType.int16), add_input(gir, DType.int16))
+        abs_inst = add_op(gir, AOP.Abs(), (source,))
+        where_inst = add_op(gir, AOP.Where(), (cond, abs_inst.retval(), other))
+        target = add_op(gir, AOP.Min(), (where_inst.retval(), other))
+        self.assertTrue(_has_abs_input_ancestor(gir, target))
+
+        # Do not follow arbitrary multi-input arithmetic into an unrelated sibling.
+        gir = GraphIR()
+        source, other = add_input(gir, DType.int16), add_input(gir, DType.int16)
+        abs_inst = add_op(gir, AOP.Abs(), (source,))
+        add_inst = add_op(gir, AOP.Add(), (abs_inst.retval(), other))
+        target = add_op(gir, AOP.Min(), (add_inst.retval(), other))
+        self.assertFalse(_has_abs_input_ancestor(gir, target))
+
+        # An Abs used only to compute Where's predicate does not contribute values.
+        gir = GraphIR()
+        source, other = add_input(gir, DType.int16), add_input(gir, DType.int16)
+        abs_inst = add_op(gir, AOP.Abs(), (source,))
+        predicate = add_op(gir, AOP.Equal(), (abs_inst.retval(), other))
+        where_inst = add_op(gir, AOP.Where(), (predicate.retval(), other, other))
+        target = add_op(gir, AOP.Min(), (where_inst.retval(), other))
+        self.assertFalse(_has_abs_input_ancestor(gir, target))
+
+    def test_int_minmax_widening_preserves_semantics(self):
+        import torch
+
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        gir = GraphIR()
+        inputs = []
+        for _ in range(2):
+            input_op = AOP.Input(2)
+            input_op.abs_tensor = AbsTensor([2, 4], DType.int16)
+            inputs.append(gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval())
+        abs_op = AOP.Abs()
+        abs_inputs = [gir.vars[inputs[0]]]
+        abs_outputs = abs_op.type_transfer(abs_inputs)
+        abs_op.bind_input_like(abs_inputs)
+        abs_op.bind_output_like(abs_outputs)
+        abs_inst = gir.add_inst(InstExpr(abs_op, (inputs[0],)))
+        min_op = AOP.Min()
+        min_inputs = [gir.vars[abs_inst.retval()], gir.vars[inputs[1]]]
+        min_outputs = min_op.type_transfer(min_inputs)
+        min_op.bind_input_like(min_inputs)
+        min_op.bind_output_like(min_outputs)
+        gir.add_inst(InstExpr(min_op, (abs_inst.retval(), inputs[1])))
+        gir.assert_wellform()
+
+        rewritten = rewrite_gir(gir, matcher)
+        self.assertIsNotNone(rewritten)
+        assert rewritten is not None
+        rewritten.assert_wellform()
+        rewritten_ops = [type(inst.iexpr.op).__name__ for inst in rewritten.insts]
+        self.assertIn('Min', rewritten_ops)
+        self.assertNotIn('Add', rewritten_ops)
+        self.assertEqual(rewritten_ops.count('CastI64'), 2)
+        self.assertEqual(rewritten_ops.count('Cast'), 1)
+
+        lhs = torch.tensor([[-32768, -5, 0, 10], [32767, 128, -1, -100]], dtype=torch.int16)
+        rhs = torch.tensor([[0, 5, 1, -20], [7, -129, -2, 0]], dtype=torch.int16)
+        expected = SymbolNet(gir)(lhs, rhs)[0]
+        self.assertTrue(torch.equal(expected, SymbolNet(rewritten)(lhs, rhs)[0]))
+        torch._dynamo.reset()
+        with _patch_symbolnet_debug_helpers():
+            compiled = torch.compile(SymbolNet(rewritten), backend='inductor', fullgraph=True)
+            self.assertTrue(torch.equal(expected, compiled(lhs, rhs)[0]))
+        torch._dynamo.reset()
 
     def test_int_squeeze_clip_without_promoting_ancestor_is_not_rewritten(self):
         import torch

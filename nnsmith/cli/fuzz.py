@@ -313,6 +313,7 @@ class FuzzingLoop:
                 argreduce_input_producers = {}
                 argreduce_input_context = {}
                 reduce_input_context = {}
+                clip_minmax_context = {}
                 initial_occurrence_keys = set()
                 for pattern, nodes in matched_occurrences:
                     pattern_counts[pattern.id] = pattern_counts.get(pattern.id, 0) + 1
@@ -372,6 +373,63 @@ class FuzzingLoop:
                                 if source_tensor is not None else None,
                                 'reduce_dim': str(reduce_dim),
                                 'axis_len': axis_len,
+                            }
+                    elif pattern.id == 'pt-inductor-int-clip-minmax':
+                        for node in nodes:
+                            inst_id = node.get('inst_id')
+                            inst = ir.find_inst_by_id(inst_id)
+                            if inst is None:
+                                continue
+                            input_contexts = []
+                            for input_var in inst.iexpr.args:
+                                input_tensor = ir.vars.get(input_var)
+                                producer_id, _ = InstIR.var_inst_idx(input_var)
+                                chain_inst = ir.find_inst_by_id(producer_id)
+                                producer_chain = []
+                                for _ in range(4):
+                                    if chain_inst is None:
+                                        break
+                                    chain_op = type(chain_inst.iexpr.op).__name__
+                                    output_tensor = (
+                                        ir.vars.get(chain_inst.retval())
+                                        if chain_inst.n_output() else None
+                                    )
+                                    producer_chain.append({
+                                        'op': chain_op,
+                                        'dtype': str(output_tensor.dtype)
+                                        if output_tensor is not None else None,
+                                        'shape': [str(dim) for dim in output_tensor.shape]
+                                        if output_tensor is not None else None,
+                                    })
+                                    if len(chain_inst.iexpr.args) != 1:
+                                        break
+                                    parent_id, _ = InstIR.var_inst_idx(chain_inst.iexpr.args[0])
+                                    chain_inst = ir.find_inst_by_id(parent_id)
+                                input_contexts.append({
+                                    'var': str(input_var),
+                                    'dtype': str(input_tensor.dtype)
+                                    if input_tensor is not None else None,
+                                    'shape': [str(dim) for dim in input_tensor.shape]
+                                    if input_tensor is not None else None,
+                                    'producer_chain': producer_chain,
+                                })
+                            output_tensor = (
+                                ir.vars.get(inst.retval()) if inst.n_output() else None
+                            )
+                            clip_minmax_context[str(inst_id)] = {
+                                'op': type(inst.iexpr.op).__name__,
+                                'input_vars': [str(var) for var in inst.iexpr.args],
+                                'input_vars_equal': len(inst.iexpr.args) == 2
+                                and inst.iexpr.args[0] == inst.iexpr.args[1],
+                                'inputs': input_contexts,
+                                'output_dtype': str(output_tensor.dtype)
+                                if output_tensor is not None else None,
+                                'output_shape': [str(dim) for dim in output_tensor.shape]
+                                if output_tensor is not None else None,
+                                'attrs': {
+                                    str(key): str(value)
+                                    for key, value in getattr(inst.iexpr.op, 'extra_attrs', {}).items()
+                                },
                             }
                     elif pattern.id in (
                         'pt-inductor-int16-abs-reduce-minmax',
@@ -459,6 +517,7 @@ class FuzzingLoop:
                         f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
                         f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
                         f"reduce_input_context={json.dumps(reduce_input_context, sort_keys=True)}; "
+                        f"clip_minmax_context={json.dumps(clip_minmax_context, sort_keys=True)}; "
                         "original GIR retained"
                     )
                 else:
@@ -492,6 +551,7 @@ class FuzzingLoop:
                         f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
                         f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
                         f"reduce_input_context={json.dumps(reduce_input_context, sort_keys=True)}; "
+                        f"clip_minmax_context={json.dumps(clip_minmax_context, sort_keys=True)}; "
                         "same seed and original GIR, local rewrite only"
                     )
 
