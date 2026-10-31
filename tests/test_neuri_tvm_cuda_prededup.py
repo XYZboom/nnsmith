@@ -67,6 +67,8 @@ class TestNeuriTvmCudaPrededup(unittest.TestCase):
         self.assertIn('rewrite_gir', make_testcase_source)
         self.assertIn('self.dedup_matcher.match_occurrences(ir)', make_testcase_source)
         self.assertIn('original GIR retained', make_testcase_source)
+        self.assertIn('rewritten_occurrence_keys', make_testcase_source)
+        self.assertIn('reduce_input_context', make_testcase_source)
         self.assertNotIn('dedup_matcher=self.dedup_matcher', generator_source)
         self.assertNotIn('resampled without seed change', make_testcase_source)
 
@@ -756,6 +758,13 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
         self.assertIn('pt-inductor-fp16-arith-rounding', round_ids)
 
     def test_validated_int_reduce_minmax_catalog(self):
+        from typing import cast
+
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.gir import GraphIR, InstExpr
+
         pattern_file = (
             Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
         )
@@ -765,33 +774,148 @@ class TestCandidateParticipatingOnlineMatcher(unittest.TestCase):
             target='cpu',
             backend='torch',
         )
-        def _pt_node(op, dtype, axis_len):
-            return {
-                'op': op,
-                'attrs': {'axis_len': axis_len},
-                'inputs': [{'var_id': 'v_in', 'shape': [axis_len], 'dtype': dtype}],
-                'outputs': [{'var_id': 'v_out', 'shape': [], 'dtype': dtype}],
-                'raw_op': op,
+        pattern_ids = {
+            'pt-inductor-int16-abs-reduce-minmax',
+            'pt-inductor-int16-abs-squeeze-reduce-minmax',
+        }
+
+        def _make_gir(with_squeeze=False, axis_len=4):
+            gir = GraphIR()
+            shape = [2, 1, axis_len] if with_squeeze else [2, axis_len]
+            input_op = AOP.Input(len(shape))
+            input_op.abs_tensor = AbsTensor(shape, DType.int16)
+            source = gir.add_inst(InstExpr(input_op, cast(tuple[str], ()))).retval()
+            abs_op = AOP.Abs()
+            abs_inputs = [gir.vars[source]]
+            abs_outputs = abs_op.type_transfer(abs_inputs)
+            abs_op.bind_input_like(abs_inputs)
+            abs_op.bind_output_like(abs_outputs)
+            abs_inst = gir.add_inst(InstExpr(abs_op, (source,)))
+            source = abs_inst.retval()
+            if with_squeeze:
+                squeeze_op = AOP.Squeeze()
+                squeeze_op.extra_attrs['reduce_dim'] = 1
+                squeeze_inputs = [gir.vars[source]]
+                squeeze_outputs = squeeze_op.type_transfer(squeeze_inputs)
+                squeeze_op.bind_input_like(squeeze_inputs)
+                squeeze_op.bind_output_like(squeeze_outputs)
+                source = gir.add_inst(InstExpr(squeeze_op, (source,))).retval()
+            reduce_op = AOP.ReduceMin()
+            reduce_op.extra_attrs['reduce_dim'] = 1
+            reduce_inputs = [gir.vars[source]]
+            reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+            reduce_op.bind_input_like(reduce_inputs)
+            reduce_op.bind_output_like(reduce_outputs)
+            gir.add_inst(InstExpr(reduce_op, (source,)))
+            gir.assert_wellform()
+            return gir
+
+        # Isolated reductions and singleton axes are outside the confirmed defect.
+        self.assertNotIn(
+            'pt-inductor-int16-abs-reduce-minmax',
+            {p.id for p, _ in dedup.match_occurrences(_make_gir(axis_len=1))},
+        )
+        for with_squeeze, expected_id in (
+            (False, 'pt-inductor-int16-abs-reduce-minmax'),
+            (True, 'pt-inductor-int16-abs-squeeze-reduce-minmax'),
+        ):
+            matched_ids = {
+                p.id for p, _ in dedup.match_occurrences(_make_gir(with_squeeze))
             }
+            self.assertIn(expected_id, matched_ids)
+            self.assertTrue(matched_ids <= pattern_ids)
 
-        # Length-one reductions are semantic identities and accounted for 209
-        # benign local rewrites in the v27 paired cohort; exclude them.
-        node_i8_len1 = _pt_node('REDUCE_MIN', 'int8', 1)
-        node_u8_len1 = _pt_node('REDUCE_MAX', 'uint8', 1)
-        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i8_len1])})
-        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_u8_len1])})
+    def test_narrow_int_reduce_minmax_widens_input_and_preserves_semantics(self):
+        import torch
 
-        # Keep non-singleton narrow-integer reductions covered.
-        node_i8_len2 = _pt_node('REDUCE_MIN', 'int8', 2)
-        node_u8_len11 = _pt_node('REDUCE_MAX', 'uint8', 11)
-        node_i16_len2 = _pt_node('REDUCE_MIN', 'int16', 2)
-        for node in (node_i8_len2, node_u8_len11, node_i16_len2):
-            self.assertIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node])})
+        from typing import cast
 
-        # int16 is covered by the shared non-singleton rule; no later rule exists.
-        node_i16_len1 = _pt_node('REDUCE_MIN', 'int16', 1)
-        self.assertNotIn('pt-inductor-int-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
-        self.assertNotIn('pt-inductor-int16-reduce-minmax', {p.id for p in dedup.matcher.match([node_i16_len1])})
+        from nnsmith.abstract import op as AOP
+        from nnsmith.abstract.dtype import DType
+        from nnsmith.abstract.tensor import AbsTensor
+        from nnsmith.dedup import DedupMatcher
+        from nnsmith.dedup.rewrite import rewrite_gir
+        from nnsmith.gir import GraphIR, InstExpr
+        from nnsmith.materialize.torch.symbolnet import SymbolNet
+
+        pattern_file = Path(__file__).parents[1] / 'nnsmith' / 'dedup' / 'patterns-pytorch.json'
+        matcher = DedupMatcher(
+            pattern_dir=str(pattern_file), compiler='pytorch', target='cpu', backend='torch'
+        )
+        values = [[-32768, -5, 5, 1], [7, -7, 0, 32767]]
+        pattern_ids = {
+            'pt-inductor-int16-abs-reduce-minmax',
+            'pt-inductor-int16-abs-squeeze-reduce-minmax',
+        }
+        for with_squeeze in (False, True):
+            x = torch.tensor(values).short()
+            if with_squeeze:
+                x = x.reshape(2, 1, 4)
+            for reduce_cls in (AOP.ReduceMin, AOP.ReduceMax):
+                with self.subTest(with_squeeze=with_squeeze, op=reduce_cls.__name__):
+                    gir = GraphIR()
+                    input_shape = [2, 1, 4] if with_squeeze else [2, 4]
+                    input_op = AOP.Input(len(input_shape))
+                    input_op.abs_tensor = AbsTensor(input_shape, DType.int16)
+                    source = gir.add_inst(
+                        InstExpr(input_op, cast(tuple[str], ()))
+                    ).retval()
+                    abs_op = AOP.Abs()
+                    abs_inputs = [gir.vars[source]]
+                    abs_outputs = abs_op.type_transfer(abs_inputs)
+                    abs_op.bind_input_like(abs_inputs)
+                    abs_op.bind_output_like(abs_outputs)
+                    source = gir.add_inst(InstExpr(abs_op, (source,))).retval()
+                    if with_squeeze:
+                        squeeze_op = AOP.Squeeze()
+                        squeeze_op.extra_attrs['reduce_dim'] = 1
+                        squeeze_inputs = [gir.vars[source]]
+                        squeeze_outputs = squeeze_op.type_transfer(squeeze_inputs)
+                        squeeze_op.bind_input_like(squeeze_inputs)
+                        squeeze_op.bind_output_like(squeeze_outputs)
+                        source = gir.add_inst(InstExpr(squeeze_op, (source,))).retval()
+                    reduce_op = reduce_cls()
+                    reduce_op.extra_attrs['reduce_dim'] = 1
+                    reduce_inputs = [gir.vars[source]]
+                    reduce_outputs = reduce_op.type_transfer(reduce_inputs)
+                    reduce_op.bind_input_like(reduce_inputs)
+                    reduce_op.bind_output_like(reduce_outputs)
+                    reduce_inst = gir.add_inst(InstExpr(reduce_op, (source,)))
+                    gir.assert_wellform()
+
+                    self.assertTrue(
+                        pattern_ids & {p.id for p, _ in matcher.match_occurrences(gir)}
+                    )
+                    rewritten = rewrite_gir(gir, matcher)
+                    self.assertIsNotNone(rewritten)
+                    assert rewritten is not None
+                    rewritten.assert_wellform()
+                    rewritten_reduce = rewritten.find_inst_by_id(reduce_inst.identifier)
+                    assert rewritten_reduce is not None
+                    self.assertEqual(
+                        rewritten.vars[rewritten_reduce.iexpr.args[0]].dtype, DType.int64
+                    )
+                    self.assertNotIn(
+                        'pt-inductor-int16-abs-reduce-minmax',
+                        {p.id for p, _ in matcher.match_occurrences(rewritten)},
+                    )
+                    self.assertNotIn(
+                        'pt-inductor-int16-abs-squeeze-reduce-minmax',
+                        {p.id for p, _ in matcher.match_occurrences(rewritten)},
+                    )
+                    expected = SymbolNet(gir)(x)[0]
+                    self.assertEqual(expected.dtype, x.dtype)
+                    self.assertTrue(torch.equal(expected, SymbolNet(rewritten)(x)[0]))
+                    torch._dynamo.reset()
+                    with _patch_symbolnet_debug_helpers():
+                        compiled = torch.compile(
+                            SymbolNet(rewritten), backend='inductor', fullgraph=True
+                        )
+                        compiled_output = compiled(x)[0]
+                        self.assertTrue(
+                            torch.equal(expected, compiled_output),
+                            msg=f'expected={expected}, compiled={compiled_output}',
+                        )
 
     def test_byte_argreduce_pattern_inserts_semantics_preserving_int64_cast(self):
         from typing import cast

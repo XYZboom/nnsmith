@@ -317,42 +317,74 @@
       ]
     },
     {
-      "id": "pt-inductor-int-reduce-minmax",
+      "id": "pt-inductor-int16-abs-reduce-minmax",
       "compiler": "pytorch",
       "target": "cpu",
-      "description": "Inductor CPU narrow-integer REDUCE_MIN/REDUCE_MAX compile failures and value inconsistencies on non-singleton reduction axes",
+      "description": "Inductor CPU int16 min_propagate_nan/max_propagate_nan overload failure after Abs",
       "severity": "crash",
       "nodes": [
         {
           "match": "node",
           "id": "n0",
-          "op": {
-            "$in": [
-              "REDUCE_MIN",
-              "REDUCE_MAX"
-            ]
-          },
-          "inputs": [
-            "v_in"
-          ],
-          "outputs": [
-            "v_out"
-          ],
+          "op": "ABS",
+          "inputs": ["v_in"],
+          "outputs": ["v_abs"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]},
+          "inputs": ["v_abs"],
+          "outputs": ["v_out"],
           "attrs": {"axis_len": {"$gte": 2}}
         }
       ],
       "values": [
+        {"match": "value", "id": "v_abs", "dtype": {"$eq": "int16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0}
+      ]
+    },
+    {
+      "id": "pt-inductor-int16-abs-squeeze-reduce-minmax",
+      "compiler": "pytorch",
+      "target": "cpu",
+      "description": "Inductor CPU int16 min/max propagation overload failure through Abs then Squeeze",
+      "severity": "crash",
+      "nodes": [
         {
-          "match": "value",
-          "id": "v_in",
-          "dtype": {
-            "$in": [
-              "int8",
-              "uint8",
-              "int16"
-            ]
-          }
+          "match": "node",
+          "id": "n0",
+          "op": "ABS",
+          "inputs": ["v_in"],
+          "outputs": ["v_abs"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n1",
+          "op": "SQUEEZE",
+          "inputs": ["v_abs"],
+          "outputs": ["v_squeezed"],
+          "attrs": {}
+        },
+        {
+          "match": "node",
+          "id": "n2",
+          "op": {"$in": ["REDUCE_MIN", "REDUCE_MAX"]},
+          "inputs": ["v_squeezed"],
+          "outputs": ["v_out"],
+          "attrs": {"axis_len": {"$gte": 2}}
         }
+      ],
+      "values": [
+        {"match": "value", "id": "v_squeezed", "dtype": {"$eq": "int16"}}
+      ],
+      "flowConstraints": [
+        {"fromNode": "n0", "fromOutput": 0, "toNode": "n1", "toInput": 0},
+        {"fromNode": "n1", "fromOutput": 0, "toNode": "n2", "toInput": 0}
       ]
     },
     {

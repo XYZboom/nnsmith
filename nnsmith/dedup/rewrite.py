@@ -169,6 +169,113 @@ def _rewrite_byte_argreduce_with_int64(gir, idx):
         return None
 
 
+def _rewrite_narrow_reduce_minmax_with_int64(gir, idx):
+    """Widen a narrow ReduceMin/ReduceMax input and cast its result back exactly."""
+    inst = gir.insts[idx]
+    if type(inst.iexpr.op).__name__ not in ('ReduceMin', 'ReduceMax') or len(inst.iexpr.args) != 1:
+        return None
+    source = inst.iexpr.args[0]
+    source_tensor = gir.vars.get(source)
+    if source_tensor is None or source_tensor.dtype not in (DType.int8, DType.uint8, DType.int16):
+        return None
+    reduce_dim = getattr(inst.iexpr.op, 'extra_attrs', {}).get('reduce_dim')
+    if reduce_dim is None:
+        return None
+    try:
+        axis = int(reduce_dim)
+        if axis < 0:
+            axis += len(source_tensor.shape)
+        if axis < 0 or axis >= len(source_tensor.shape) or int(source_tensor.shape[axis]) < 2:
+            return None
+    except (TypeError, ValueError):
+        return None
+
+    original_outputs = [gir.vars.get(inst.retval(i)) for i in range(inst.n_output())]
+    if not original_outputs or any(output is None for output in original_outputs):
+        return None
+    old_users = list(inst.users[0])
+    unary_chain = _collect_narrow_unary_nodes(gir, source, source_tensor.dtype)
+    if unary_chain is None:
+        return None
+    rewritten = copy.deepcopy(gir)
+    for unary_id in reversed(unary_chain[0]):
+        if not _widen_narrow_unary_preserving_wrap(rewritten, unary_id):
+            return None
+    rewritten_inst = rewritten.find_inst_by_id(inst.identifier)
+    if rewritten_inst is None:
+        return None
+    source = rewritten_inst.iexpr.args[0]
+    source_tensor = rewritten.vars.get(source)
+    if source_tensor is None:
+        return None
+
+    try:
+        cast_up = AOP.CastI64()
+        cast_inputs = [AbsTensor(list(source_tensor.shape), source_tensor.dtype)]
+        cast_outputs = cast_up.type_transfer(cast_inputs)
+        if len(cast_outputs) != 1 or cast_outputs[0].dtype != DType.int64:
+            return None
+        if any(not bool(c) for c in cast_up.checked_requires(cast_inputs)):
+            return None
+        cast_up.bind_input_like(cast_inputs)
+        cast_up.bind_output_like(cast_outputs)
+
+        reduce_op = copy.deepcopy(rewritten_inst.iexpr.op)
+        reduced_outputs = reduce_op.type_transfer(cast_outputs)
+        if len(reduced_outputs) != len(original_outputs):
+            return None
+        if any(
+            list(reduced.shape) != list(original.shape)
+            or reduced.dtype != DType.int64
+            for reduced, original in zip(reduced_outputs, original_outputs)
+        ):
+            return None
+        if any(not bool(c) for c in reduce_op.checked_requires(cast_outputs)):
+            return None
+        reduce_op.bind_input_like(cast_outputs)
+        reduce_op.bind_output_like(reduced_outputs)
+
+        cast_inst = rewritten.add_inst(InstExpr(cast_up, (source,)))
+        rewritten_inst.iexpr.args = list(rewritten_inst.iexpr.args)
+        rewritten.replace_arg(rewritten_inst, 0, cast_inst.retval(), type_check=False)
+        rewritten_inst.iexpr.args = tuple(rewritten_inst.iexpr.args)
+        rewritten_inst.iexpr.op = reduce_op
+        old_output = rewritten_inst.retval()
+        rewritten.vars[old_output] = AbsTensor(list(reduced_outputs[0].shape), DType.int64)
+
+        output_dtype = original_outputs[0].dtype
+        if output_dtype not in (DType.int8, DType.uint8, DType.int16):
+            return None
+        cast_down = AOP.Cast(output_dtype)
+        cast_down_inputs = [rewritten.vars[old_output]]
+        cast_down_outputs = cast_down.type_transfer(cast_down_inputs)
+        if (
+            len(cast_down_outputs) != 1
+            or list(cast_down_outputs[0].shape) != list(original_outputs[0].shape)
+            or cast_down_outputs[0].dtype != output_dtype
+        ):
+            return None
+        if any(not bool(c) for c in cast_down.checked_requires(cast_down_inputs)):
+            return None
+        cast_down.bind_input_like(cast_down_inputs)
+        cast_down.bind_output_like(cast_down_outputs)
+        cast_down_inst = rewritten.add_inst(InstExpr(cast_down, (old_output,)))
+
+        for old_user in old_users:
+            user = rewritten.find_inst_by_id(old_user.identifier)
+            if user is None:
+                return None
+            for arg_idx, arg in enumerate(list(user.iexpr.args)):
+                if arg == old_output:
+                    user.iexpr.args = list(user.iexpr.args)
+                    rewritten.replace_arg(user, arg_idx, cast_down_inst.retval(), type_check=False)
+                    user.iexpr.args = tuple(user.iexpr.args)
+        rewritten.assert_wellform()
+        return rewritten
+    except Exception:
+        return None
+
+
 def _collect_narrow_unary_nodes(gir, value, dtype):
     """Return promotion-sensitive unary IDs on a safe single-input ancestor path."""
     view_ops = {'Concat1', 'Slice', 'Reshape', 'Transpose', 'Squeeze', 'Flatten'}
@@ -537,6 +644,13 @@ def rewrite_gir(gir, dedup_matcher, max_candidates=6):
                     widened = _rewrite_byte_argreduce_with_int64(working, inst_idx)
                     if widened is not None:
                         candidate_rewrites.append(widened)
+                elif pattern.id in (
+                    'pt-inductor-int16-abs-reduce-minmax',
+                    'pt-inductor-int16-abs-squeeze-reduce-minmax',
+                ):
+                    widened_reduce = _rewrite_narrow_reduce_minmax_with_int64(working, inst_idx)
+                    if widened_reduce is not None:
+                        candidate_rewrites.append(widened_reduce)
                 elif pattern.id == 'pt-inductor-int16-argminmax':
                     widened_argreduce = _rewrite_int16_argreduce_after_safe_producer(
                         working, inst_idx

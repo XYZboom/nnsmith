@@ -312,6 +312,7 @@ class FuzzingLoop:
                 pattern_counts = {}
                 argreduce_input_producers = {}
                 argreduce_input_context = {}
+                reduce_input_context = {}
                 initial_occurrence_keys = set()
                 for pattern, nodes in matched_occurrences:
                     pattern_counts[pattern.id] = pattern_counts.get(pattern.id, 0) + 1
@@ -335,9 +336,9 @@ class FuzzingLoop:
                             )
                             argreduce_input_producers[str(inst_id)] = producer_name
                             source_tensor = ir.vars.get(inst.iexpr.args[0])
-                            reduce_dim = inst.iexpr.op.extra_attrs.get('reduce_dim')
+                            reduce_dim = getattr(inst.iexpr.op, 'extra_attrs', {}).get('reduce_dim')
                             axis_len = None
-                            if source_tensor is not None:
+                            if source_tensor is not None and reduce_dim is not None:
                                 try:
                                     axis = int(reduce_dim)
                                     if axis < 0:
@@ -372,6 +373,62 @@ class FuzzingLoop:
                                 'reduce_dim': str(reduce_dim),
                                 'axis_len': axis_len,
                             }
+                    elif pattern.id in (
+                        'pt-inductor-int16-abs-reduce-minmax',
+                        'pt-inductor-int16-abs-squeeze-reduce-minmax',
+                    ):
+                        for node in nodes:
+                            inst_id = node.get('inst_id')
+                            inst = ir.find_inst_by_id(inst_id)
+                            if (
+                                inst is None
+                                or type(inst.iexpr.op).__name__ not in ('ReduceMin', 'ReduceMax')
+                                or len(inst.iexpr.args) != 1
+                            ):
+                                continue
+                            source_var = inst.iexpr.args[0]
+                            source_tensor = ir.vars.get(source_var)
+                            producer_id, _ = InstIR.var_inst_idx(source_var)
+                            producer = ir.find_inst_by_id(producer_id)
+                            producer_chain = []
+                            chain_inst = producer
+                            for _ in range(6):
+                                if chain_inst is None:
+                                    break
+                                chain_op = type(chain_inst.iexpr.op).__name__
+                                output_tensor = (
+                                    ir.vars.get(chain_inst.retval()) if chain_inst.n_output() else None
+                                )
+                                producer_chain.append({
+                                    'op': chain_op,
+                                    'dtype': str(output_tensor.dtype) if output_tensor is not None else None,
+                                    'shape': [str(dim) for dim in output_tensor.shape]
+                                    if output_tensor is not None else None,
+                                })
+                                if chain_op in ('Input', 'Constant') or len(chain_inst.iexpr.args) != 1:
+                                    break
+                                parent_id, _ = InstIR.var_inst_idx(chain_inst.iexpr.args[0])
+                                chain_inst = ir.find_inst_by_id(parent_id)
+                            reduce_dim = getattr(inst.iexpr.op, 'extra_attrs', {}).get('reduce_dim')
+                            axis_len = None
+                            if source_tensor is not None and reduce_dim is not None:
+                                try:
+                                    axis = int(reduce_dim)
+                                    if axis < 0:
+                                        axis += len(source_tensor.shape)
+                                    if 0 <= axis < len(source_tensor.shape):
+                                        axis_len = str(source_tensor.shape[axis])
+                                except (TypeError, ValueError):
+                                    pass
+                            reduce_input_context[str(inst_id)] = {
+                                'op': type(inst.iexpr.op).__name__,
+                                'input_dtype': str(source_tensor.dtype) if source_tensor is not None else None,
+                                'input_shape': [str(dim) for dim in source_tensor.shape]
+                                if source_tensor is not None else None,
+                                'reduce_dim': str(reduce_dim),
+                                'axis_len': axis_len,
+                                'producer_chain': producer_chain,
+                            }
                 original_op_by_id = {
                     inst.identifier: type(inst.iexpr.op).__name__ for inst in ir.insts
                 }
@@ -401,6 +458,7 @@ class FuzzingLoop:
                         f"{json.dumps(pattern_counts, sort_keys=True)} rewrite=failed; "
                         f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
                         f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
+                        f"reduce_input_context={json.dumps(reduce_input_context, sort_keys=True)}; "
                         "original GIR retained"
                     )
                 else:
@@ -413,18 +471,27 @@ class FuzzingLoop:
                         residual_occurrence_keys.add(
                             (pattern.id, tuple(node.get('inst_id') for node in nodes))
                         )
-                    removed_occurrences = len(initial_occurrence_keys - residual_occurrence_keys)
+                    removed_occurrence_keys = [
+                        {'pattern_id': pattern_id, 'inst_ids': list(inst_ids)}
+                        for pattern_id, inst_ids in sorted(
+                            initial_occurrence_keys - residual_occurrence_keys,
+                            key=lambda item: (item[0], tuple(str(inst_id) for inst_id in item[1])),
+                        )
+                    ]
+                    removed_occurrences = len(removed_occurrence_keys)
                     rewrite_status = 'partial' if residual_occurrences else 'applied'
                     self.n_dedup_rewrite += removed_occurrences
                     FUZZ_LOG.info(
                         f"Local pre-dedup: seed {seed} pattern_matches="
                         f"{json.dumps(pattern_counts, sort_keys=True)} rewrite={rewrite_status}; "
                         f"rewritten_occurrences={removed_occurrences}; "
+                        f"rewritten_occurrence_keys={json.dumps(removed_occurrence_keys, sort_keys=True)}; "
                         f"remaining_pattern_matches={json.dumps(residual_counts, sort_keys=True)}; "
                         f"rewritten_ops={json.dumps(rewritten_ops, sort_keys=True)}; "
                         f"inserted_ops={json.dumps(inserted_ops, sort_keys=True)}; "
                         f"argreduce_input_producers={json.dumps(argreduce_input_producers, sort_keys=True)}; "
                         f"argreduce_input_context={json.dumps(argreduce_input_context, sort_keys=True)}; "
+                        f"reduce_input_context={json.dumps(reduce_input_context, sort_keys=True)}; "
                         "same seed and original GIR, local rewrite only"
                     )
 
